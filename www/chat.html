@@ -59,9 +59,16 @@ body {
 <div id="app">
     <v-container fluid id="main">
         <v-row dense>
-            <div style="width: 100vw" class="text-h4 pa-2 elevation-2">
-                感染者疫学調査
-            </div>
+            <v-col cols="4">
+                <div style="width: 100vw" class="text-h4 pa-2 elevation-2">
+                    感染者疫学調査
+                </div>
+            </v-col>
+            <v-col cols="8">
+                <div>
+                    {{MessageToUser}}
+                </div>
+            </v-col>
         </v-row>
         <v-row style="height: 90vh" dense>
             <v-col cols="2">
@@ -78,6 +85,7 @@ body {
                             <v-btn
                                 width="90%"
                                 class="pa-2"
+                                :disabled="roleNameBtnDisabled"
                                 v-bind="activatorProps"
                             >
                                 {{roleNameText}}
@@ -177,6 +185,7 @@ body {
                                 rows="4"
                                 :counter="chatInputMaxSize"
                                 :label="chatInputMaxSizeText"
+                                :disabled="chatInputDisabled"
                                 @input="chatInputSubmitWithEnter"
                             ></v-textarea>
                         </div>
@@ -211,28 +220,47 @@ body {
 </div>
 
 <script>
+async function get_data(url, opt) {
+    opt.headers = { 'Content-Type': 'application/json' };
+    const res = await fetch(url, opt);
+    return await res.json();
+}
+
 const {createApp, h} = Vue;
 const {createVuetify} = Vuetify;
 const vuetify = createVuetify();
 const app = createApp({
     data() {
         return {
+            userId: null,
+            ws: null,
+            protocol: null,
+            host: null,
             // registraion
+            roleNameBtnDisabled: false,
             registrationDialog: false,
-            roleName: null,
             roleNameText: 'ロールの選択',
             roleNameDraft: null,
             registered: false,
             // chat history
+            chatHistory: [],
+            chatHistoryLastNum: 0,
             chatHitsoryFontSizeNum: 1,
             chatHistoryFontSize: 'text-h5',
             chatInputText: '',
             chatInputMaxSize: 150,
-            chatHistory: [],
             // chat input
+            chatInputDisabled: true,
             confSubmitWithEnter: true,
             confSubmitThenClear: true,
+            //
+            MessageToUser: 'ロールを選択してください。',
         };
+    },
+    mounted() {
+        ret = RegExp('^(http?)://([^/]+)/').exec(document.baseURI);
+        this.protocol = ret[1];
+        this.host = ret[2];
     },
     computed: {
         chatHistoryLeftStyle: function() {
@@ -248,10 +276,58 @@ const app = createApp({
     methods: {
         submitRegistrationDialog(value) {
             if (this.roleNameDraft !== null) {
-                this.roleName = this.roleNameDraft;
                 this.roleNameText = this.roleNameDraft;
+                this.roleNameBtnDisabled = true;
                 this.registrationDialog = false;
+                this.startWebSocket();
             }
+        },
+        startWebSocket() {
+            let opt = {
+                method: 'POST',
+                body: JSON.stringify({
+                    msg_type: 'RegistrationRequest',
+                    user_role: this.roleNameDraft,
+                }),
+            };
+            let url = `${this.protocol}://${this.host}/v1`;
+            get_data(url, opt).then(res => {
+                this.userId = res.user_id;
+                this.status = res.user_status;
+console.log("HTTP", res);
+                if (res.msg_type == 'RegistrationSuccessful') {
+                    this.MessageToUser = '登録が完了しました。';
+                } else {
+                    this.MessageToUser = 'ERROR';
+                }
+                //
+                let url = `ws://${this.host}/v1/ws/${this.userId}`;
+                this.ws = new WebSocket(url);
+                let it = this
+                this.ws.onmessage = function (event) {
+                    ret = JSON.parse(event.data);
+console.log("WS", ret);
+                    if (ret.msg_type == 'Prepared') {
+                        this.MessageToUser = '相手を探しています。';
+                    } else if (ret.msg_type == 'Established') {
+                        it.status = ret.user_status;
+                        it.MessageToUser = '相手の準備ができました。';
+                        it.chatInputDisabled = false;
+                    } else if (ret.msg_type == 'MessageForwarded') {
+                        it.MessageToUser = '相手が応答しました。';
+                        it.chatHistory.push({
+                            num: it.chatHistoryLastNum + 2,
+                            message: ret.user_msg,
+                        });
+                        // 後処理
+                        it.chatInputLock = false;
+                        if (it.confSubmitThenClear === true) {
+                            it.chatInputText = '';
+                        }
+                        it.chatHistoryToBottom();
+                    }
+                }
+            });
         },
         chatInputSubmitWithEnter(value) {
             if (this.confSubmitWithEnter === false) {
@@ -265,34 +341,48 @@ const app = createApp({
         },
         submitChatInputText(value) {
             this.chatInputText = this.chatInputText.trim()
+            if (this.status != 'Established') {
+                this.MessageToUser = `相手が見つかっていません。しばらくお待ちください。`;
+                return;
+            }
             if (!this.chatInputText) {
-                console.log(`chatInputTextがからっぽ`);
+                this.MessageToUser = `入力されていません。応答を入力してください。`;
                 return;
             }
             if (this.chatInputLock) {
-                console.log(`相手の応答をまってからるちょっとまって`);
+                this.MessageToUser = `相手の応答を待っています。しばらくお待ちください。`;
                 return;
             }
             // lock.
             this.chatInputLock = true;
             // input
             if (this.chatHistory.length == 0) {
-                max_num = 0
+                this.chatHistoryLastNum = 0
             } else {
-                max_num = this.chatHistory.slice(-1)[0].num;
+                this.chatHistoryLastNum = this.chatHistory.slice(-1)[0].num;
             }
             this.chatHistory.push({
-                num: max_num + 1,
+                num: this.chatHistoryLastNum + 1,
                 message: this.chatInputText,
             });
+            this.chatHistoryToBottom();
             // response
+            //this.getChatResponseDebug(this.chatInputText);
             this.getChatResponse(this.chatInputText);
         },
         async getChatResponse(input_text) {
+            await this.ws.send(JSON.stringify({
+                msg_type: 'MessageSubmitted',
+                user_id: this.userId,
+                user_msg: input_text,
+            }));
+        },
+        async getChatResponseDebug(input_text) {
+            //デバッグ用
             await new Promise(resolve => setTimeout(resolve, 3000));
             response = `${input_text} は分かりません。`;
             this.chatHistory.push({
-                num: max_num + 2,
+                num: this.chatHistoryLastNum + 2,
                 message: response,
             });
             // 後処理
@@ -305,7 +395,8 @@ const app = createApp({
         async chatHistoryToBottom() {
             // 履歴をスクロールさせる。
             // いまいちな感じ。
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // setTimeout()は、レンダリングされるまで少し待つ必要があるため。
+            await new Promise(resolve => setTimeout(resolve, 300));
             let children = this.$refs.divChatHistory.children;
             children[children.length-1].scrollIntoView({ behavior: 'instant', block: 'end' });
         },
