@@ -1,10 +1,12 @@
-from fastapi import FastAPI, Body, Request, HTTPException, WebSocket
+from fastapi import FastAPI, Body, Request, HTTPException
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi import status as httpcode
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from typing import Union
 from modelChat import *
+from modelUserDef import *
 import aiofile
 import dateutil.parser
 import asyncio
@@ -40,7 +42,6 @@ def api(config):
     # create OpenAI API wrapper
     oaw = OpenAIAssistantWrapper(config)
 
-    users = {}
     app = FastAPI()
 
     @app.exception_handler(RequestValidationError)
@@ -69,7 +70,7 @@ def api(config):
         base = f"{datetime.now().timestamp()}-{random()}"
         return sha1(base.encode()).hexdigest()
 
-    async def _session_human(user: UserDef):
+    def _find_peer_human(user: UserDef):
         # find a peer
         if user.role == "患者":
             peer_role = "保健師"
@@ -78,34 +79,32 @@ def api(config):
         else:
             raise ValueError(f"ERROR: invalid user role {user.role}")
 
-        peer = None
         for u in users.values():
             if u.role == peer_role and u.status == Status.Prepared.name:
-                break
-
-        if peer is not None:
-            #
-            peer.status = Status.Established.name
-            peer.peer = user
-            await peer.ws.send_json(
-                Established(peer_id=user.user_id).dict()
-                )
-            #
-            user.status = Status.Established.name
-            user.peer = peer
-            await user.ws.send_json(
-                Established(peer_id=peer.user_id).dict()
-                )
+                return u
         else:
-            await user.ws.send_json(
-                    Prepared().dict()
-                    )
+            return None
 
+    def _find_peer_ai(user: UserDef):
+        if user.role != "保健師":
+            return None
+        return None
+        # 患者036
+        # OpenAI Assistant ID
+        # XXX 指定する、あるいはランダムにするか？
+
+        PATIENT_ID = "asst_Dd1MBx0OZCIh6loApeaMUdHx"
+        return AIPatient(
+                user_id = get_user_id(),
+                patient_id = PATIENT_ID,
+                thread_id = "TO_BE_UPDATED",
+                )
+
+    async def _session_human(user: UserDef):
         #try:
         if True:
             while True:
                 data = await user.ws.receive_json()
-                print("xxx", data)
                 if data["msg_type"] == MsgType.MessageSubmitted.name:
                     m = MessageSubmitted.model_validate(data)
                     peer = users[m.user_id].peer
@@ -131,16 +130,6 @@ def api(config):
         """
 
     async def _session_ai(user: UserDef):
-        if user.role != "保健師":
-            raise ValueError(f"ERROR: invalid user role {user.role}")
-
-        user.status = Status.Established.name
-        user.peer = await oaw.create_thread()
-        user.peer.user_id = get_user_id()
-        await user.ws.send_json(
-            Established(peer_id=user.peer.user_id).dict()
-            )
-
         #try:
         if True:
             while True:
@@ -220,14 +209,48 @@ def api(config):
                     reason=f"Invalid user ID {user_id}"
                     )
 
-        await ws.accept()
+        try:
+            await ws.accept()
 
-        user = users[user_id]
-        user.ws = ws
-        user.status = Status.Prepared.name
+            user = users[user_id]
+            user.ws = ws
+            user.status = Status.Prepared.name
 
-        #await _session_human(user)
-        await _session_ai(user)
+            peer = _find_peer_human(user)
+            if peer:
+                # vs human
+                peer.status = Status.Established.name
+                peer.peer = user
+                await peer.ws.send_json(
+                    Established(peer_id=user.user_id).dict()
+                    )
+                #
+                user.status = Status.Established.name
+                user.peer = peer
+                await user.ws.send_json(
+                    Established(peer_id=peer.user_id).dict()
+                    )
+                await _session_human(user)
+            else:
+                peer = _find_peer_ai(user)
+                if peer:
+                    # vs ai
+                    user.status = Status.Established.name
+                    user.peer = peer
+                    peer.thread_id = await oaw.create_thread()
+                    await user.ws.send_json(
+                        Established(peer_id=user.peer.user_id).dict()
+                        )
+                    await _session_ai(user)
+                else:
+                    # prepare to make a sessoin with a human.
+                    await user.ws.send_json(
+                            Prepared().dict()
+                            )
+                    await _session_human(user)
+        except WebSocketDisconnect as e:
+            print("XXX")
+            print(e)
 
     #
     from fastapi.staticfiles import StaticFiles
@@ -237,11 +260,3 @@ def api(config):
     #
     return app
 
-    """
-        ret = await oaiw.request(in_data)
-        if ret == True:
-            return {"status":"OK"}
-        else:
-            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE,
-                                detail=f"message queue is full")
-    """
