@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Literal, Union, List, Optional, Any
+from modelOAWrapper import AIPatientThread
 
 """
 ## 状態遷移
@@ -106,7 +107,9 @@ class UserDef(BaseModel):
     role: str
     status: str
     ws: Any=None
-    peer: Optional["UserDef"]=None
+    peer: Optional[Union["UserDef",AIPatientThread]] = Field(
+            None,
+            description="placeholder of the peer information.")
 
 # C > S
 class RegistrationRequest(BaseModel):
