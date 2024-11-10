@@ -11,6 +11,6 @@ def openai_get_apikey(storage):
     else:
         apikey = open(storage).read().strip()
     if apikey is None:
-        raise ValueError(f"APIKEY is not defined.")
+        raise ValueError(f"APIKEY doesn't exist {storage}.")
     return apikey
 
