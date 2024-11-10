@@ -7,6 +7,7 @@ from argparse import ArgumentParser
 import re
 from os import environ
 from modelHistory import History
+from openai_etc import openai_get_apikey
 
 class Config(BaseModel):
     wait_time: int = 5
@@ -62,19 +63,6 @@ def start_test(client,
         sleep(config.wait_time)
     return result
 
-def get_apikey(target):
-    apikey = None
-    if target is None:
-        apikey = environ.get("OPENAI_APIKEY")
-    r = re.match(r"env:([\w\d]+)", target)
-    if r:
-        apikey = environ.get(r.group(1))
-    else:
-        apikey = open(target).read().strip()
-    if apikey is None:
-        raise ValueError(f"APIKEY is not defined.")
-    return apikey
-
 #
 # main
 #
@@ -84,7 +72,7 @@ ap.add_argument("-i", help="specify a history file.",
 ap.add_argument("-o", help="specify a result file.",
                 dest="result_file", required=True)
 ap.add_argument("-k", help="specify APIKEY file.",
-                dest="apikey_target")
+                dest="apikey_storage")
 ap.add_argument("-s", help="truncation strategy id.",
                 dest="ts_id", default="last10")
 ap.add_argument("-w", help="specify a number of waiting time in second.",
@@ -109,7 +97,7 @@ if opt.history_file:
                     }
                 }[opt.ts_id]
             )
-    owa_client = OpenAI(api_key=get_apikey(opt.apikey_target))
+    owa_client = OpenAI(api_key=openai_get_apikey(opt.apikey_storage))
     result = start_test(owa_client, history, config)
     if opt.result_file:
         json.dump(result, open(opt.result_file, "w", encoding="utf-8"),
