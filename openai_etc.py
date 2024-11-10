@@ -1,4 +1,5 @@
 from os import environ
+import re
 
 def openai_get_apikey(storage):
     apikey = None
