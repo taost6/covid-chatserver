@@ -14,7 +14,7 @@ from openai_assistant import OpenAIAssistantWrapper
 from uuid import uuid4
 from enum import Enum, auto
 from datetime import datetime
-from random import random
+from random import random, choice
 from hashlib import sha1
 
 class MsgType(Enum):
@@ -88,16 +88,12 @@ def api(config):
     def _find_peer_ai(user: UserDef):
         if user.role != "保健師":
             return None
-        return None
-        # 患者036
-        # OpenAI Assistant ID
-        # XXX 指定する、あるいはランダムにするか？
-
-        PATIENT_ID = "asst_Dd1MBx0OZCIh6loApeaMUdHx"
+        assistants = [
+                "asst_3QFD4I5A1io0Xi8iCwgUGVHA",
+                ]
         return AIPatient(
                 user_id = get_user_id(),
-                patient_id = PATIENT_ID,
-                thread_id = "TO_BE_UPDATED",
+                patient_id = choice(assistants),
                 )
 
     async def _session_human(user: UserDef):
