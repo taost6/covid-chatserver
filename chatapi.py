@@ -8,9 +8,12 @@ from modelChat import *
 import aiofile
 import dateutil.parser
 import asyncio
-#from mmworker import SendMessage
+from openai_assistant import OpenAIAssistantWrapper
 from uuid import uuid4
 from enum import Enum, auto
+from datetime import datetime
+from random import random
+from hashlib import sha1
 
 class MsgType(Enum):
     RegistrationRequest = 0
@@ -34,12 +37,9 @@ def api(config):
 
     config.queue = asyncio.Queue(maxsize=config.max_queue_size)
     config.queue._loop = config.loop
-    # create sendmsg object.
-    #sendmsg = SendMessage(config)
-    # start sendmsg worker.
-    #config.loop.create_task(sendmsg.worker())
+    # create OpenAI API wrapper
+    oaw = OpenAIAssistantWrapper(config)
 
-    #xtmap = XTokenMap()
     users = {}
     app = FastAPI()
 
@@ -61,11 +61,16 @@ def api(config):
         role: str
         status: str
         ws: ws
-        peer: UserDef
+        peer: Union[UserDef
     """
     users = {}
 
-    def _find_peer(user):
+    def get_user_id() -> str:
+        base = f"{datetime.now().timestamp()}-{random()}"
+        return sha1(base.encode()).hexdigest()
+
+    async def _session_human(user: UserDef):
+        # find a peer
         if user.role == "患者":
             peer_role = "保健師"
         elif user.role == "保健師":
@@ -73,14 +78,11 @@ def api(config):
         else:
             raise ValueError(f"ERROR: invalid user role {user.role}")
 
+        peer = None
         for u in users.values():
             if u.role == peer_role and u.status == Status.Prepared.name:
-                return u
-        else:
-            return None
+                break
 
-    async def _preparation(user: UserDef):
-        peer = _find_peer(user)
         if peer is not None:
             #
             peer.status = Status.Established.name
@@ -99,9 +101,74 @@ def api(config):
                     Prepared().dict()
                     )
 
+        #try:
+        if True:
+            while True:
+                data = await user.ws.receive_json()
+                print("xxx", data)
+                if data["msg_type"] == MsgType.MessageSubmitted.name:
+                    m = MessageSubmitted.model_validate(data)
+                    peer = users[m.user_id].peer
+                    if peer is not None:
+                        await peer.ws.send_json(
+                                MessageForwarded(
+                                    peer_id=m.user_id,
+                                    user_msg=m.user_msg
+                                ).dict())
+                    else:
+                        raise ValueError(f"ERROR: peer doesn't exit {user}")
+                else:
+                    await user.ws.send_json(
+                            MessageRejected(
+                                reason="ERROR: Invalid Message Type",
+                            ).dict())
+        """
+        except Exception as e:
+            print(e)
+            # If a user disconnects, remove them from the dictionary
+            await user.ws.close()
+            del users[user_id]
+        """
+
+    async def _session_ai(user: UserDef):
+        if user.role != "保健師":
+            raise ValueError(f"ERROR: invalid user role {user.role}")
+
+        user.status = Status.Established.name
+        user.peer = await oaw.create_thread()
+        user.peer.user_id = get_user_id()
+        await user.ws.send_json(
+            Established(peer_id=user.peer.user_id).dict()
+            )
+
+        #try:
+        if True:
+            while True:
+                data = await user.ws.receive_json()
+                if data["msg_type"] == MsgType.MessageSubmitted.name:
+                    m = MessageSubmitted.model_validate(data)
+                    response_msg = await oaw.send_message(user.peer, m.user_msg)
+                    await user.ws.send_json(
+                            MessageForwarded(
+                                peer_id=user.peer.user_id,
+                                user_msg=response_msg,
+                            ).dict())
+                else:
+                    await user.ws.send_json(
+                            MessageRejected(
+                                reason="ERROR: Invalid Message Type",
+                            ).dict())
+        """
+        except Exception as e:
+            print(e)
+            # If a user disconnects, remove them from the dictionary
+            await user.ws.close()
+            del users[user_id]
+        """
+
     def _registration(req: RegistrationRequest):
         for i in range(3):
-            user_id = str(uuid4())
+            user_id = get_user_id()
             if not users.get(user_id):
                 break
         else:
@@ -159,37 +226,10 @@ def api(config):
         user.ws = ws
         user.status = Status.Prepared.name
 
-        await _preparation(user)
+        #await _session_human(user)
+        await _session_ai(user)
 
-        #try:
-        if True:
-            while True:
-                data = await ws.receive_json()
-                print("xxx", data)
-                if data["msg_type"] == MsgType.MessageSubmitted.name:
-                    m = MessageSubmitted.model_validate(data)
-                    peer = users[m.user_id].peer
-                    if peer is not None:
-                        await peer.ws.send_json(
-                                MessageForwarded(
-                                    peer_id=m.user_id,
-                                    user_msg=m.user_msg
-                                ).dict())
-                else:
-                    await ws.send_json(
-                            MessageRejected(
-                                reason="ERROR: Invalid Message Type",
-                            ).dict())
-        """
-        except Exception as e:
-            print(e)
-            # If a user disconnects, remove them from the dictionary
-            await ws.close()
-            del users[user_id]
-        """
-
-    """
-    """
+    #
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=config.www_path, html=True),
               name="www")
@@ -197,3 +237,11 @@ def api(config):
     #
     return app
 
+    """
+        ret = await oaiw.request(in_data)
+        if ret == True:
+            return {"status":"OK"}
+        else:
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE,
+                                detail=f"message queue is full")
+    """

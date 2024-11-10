@@ -12,6 +12,7 @@ class ChatConfigModel(BaseModel):
     server_address: str = ""
     server_port: int = 8889
     www_path: str = "www"
+    apikey_storage: str = "env:OPENAPI_APIKEY"
     log_file: str
     log_stdout: bool = False
     enable_debug: bool = False
