@@ -2,16 +2,20 @@ from argparse import ArgumentParser
 import json
 
 ap = ArgumentParser()
-ap.add_argument("result_file", help="1st item.")
+ap.add_argument("result_files", nargs="*", help="result files.")
 opt = ap.parse_args()
 
-js = json.load(open(opt.result_file, encoding="utf-8"))
-for i,m in enumerate(js):
-    if m["role"] == "user":
-        print("## user")
-        print(m["text"])
-    elif m["role"] == "assistant":
-        print("- assistant(original)")
-        print(m["text"])
-        print("- assistant(result)")
-        print(js[i-1]["response"])
+result = []
+for file in opt.result_files:
+    js = json.load(open(file, encoding="utf-8"))
+    n = 0
+    d = {}
+    for i,m in enumerate(js):
+        if m["role"] == "user":
+            d["id"] = n
+            d["user"] = m["text"]
+        elif m["role"] == "assistant":
+            d["original"] = m["text"]
+            d["response"] = js[i-1]["response"]
+            result.append(d)
+            d = {}
