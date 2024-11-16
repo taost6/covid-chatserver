@@ -33,43 +33,9 @@ D. ユーザの相手を見つける。
     - Eに移行できる。
 
 Z. セッションを終了する。
-    - ユーザは*Unregistered Request*をシステムに送信する。
-
-(以下は予定)
-
-E. 相手を切り替える。
-    - ユーザの状態は**Established**であること。
-    - ユーザは*Unestablishment Request*をシステムに送信する。
-    - 相手との接続の解除が成功すると、システムは*Unestablishment Succeeded*を双方に送信する。
-    - ユーザの状態は、**Registered**になる。
-    - CまたはEに移行できる。
-
-E. ロールを切り替える。
-    - ユーザの状態は**Registered**であること。
-    - ユーザは*Unregistered Request*をシステムに送信する。
-    - ロールの初期化が成功すると、システムは*Unregistered Succeeded*をユーザに送信する。
-    - ユーザの状態は、**Initial**になる。
-    - Bに移行できる。
+    - ユーザは*EndSession Request*をシステムに送信する。
 
 ## Function Code (msg_type)
-
-|--------------------------|----------|--------|
-|Function Type             |Initiator |  Sync  |
-|--------------------------|----------|--------|
-|Registration Request      | Client   |  Sync  |
-|Registration Rejected     | System   |  SyncR |
-|Registration Succeeded    | System   |  SyncR |
-|Unregistration Request    | Client   |  Sync  |
-|Unregistration Succeeded  | System   |  SyncR |
-|Establishment Succeeded   | System   |  Async |
-|Unestablishment Request   | Client   |  Async |
-|Unestablishment Succeeded | System   |  Async |
-|Message Submission        | Client   |  Sync  |
-|Message Server Received   | System   |  SyncR |
-|Message Distribution      | System   |  Sync  |
-|Message Client Received   | Client   |  SyncR |
-|Roster Request            | Client   |  Sync  |
-|Roster Distribution       | System   |  SyncR |
 
 ## User Id (user_id)
 
@@ -83,8 +49,8 @@ E. ロールを切り替える。
 
 ## User Role (user_role)
 
-- H: 保健師
-- P: 患者
+- 保健師
+- 患者
 
 ## Status (user_status)
 
@@ -92,8 +58,8 @@ E. ロールを切り替える。
     - システムの状態。常に一定。
 - Initial
     - ユーザの状態。初期状態。
-    - Registrationが成功するとRegisteredになる。
-- Registered
+    - Registrationが成功するとPreparedになる。
+- Prepared
     - ユーザの状態。user_roleを登録した状態。
     - Unregisterationが成功するとInitialになる。
 - Established
@@ -134,64 +100,30 @@ class Established(BaseModel):
     user_status: str="Established"
     peer_id: str
 
-"""
-class UnregistrationRequest(BaseModel):
-    msg_type: str="UnregistrationRequest"
-    user_id: str
-
-class UnregistrationSucceeded(BaseModel):
-    msg_type: str="UnregistrationSucceeded"
-    user_status: str="Initial"
-"""
-
-"""
-class UnestablishmentRequest(BaseModel):
-    msg_type: str="UnestablishmentRequest"
-    user_id: str
-    #session_id: str
-
-class UnestablishmentSucceeded(BaseModel):
-    msg_type: str="UnestablishmentSucceeded"
-    user_status: str="Registered"
-"""
-
+# U > S
 class MessageSubmitted(BaseModel):
     msg_type: str="MessageSubmitted"
     user_id: str
     user_msg: str
 
-"""
-
-class MessageReceived(BaseModel):
-    msg_type: str="MessageReceived"
-"""
-
+# S > U
 class MessageForwarded(BaseModel):
     msg_type: str="MessageForwarded"
     peer_id: str
     user_msg: str
 
+# S > U
 class MessageRejected(BaseModel):
     msg_type: str="MessageRejected"
     reason: str
 
-"""
-class RosterRequest(BaseModel):
-    msg_type: str="RosterRequest"
-
-class Client(BaseModel):
-    user_id: str
-    user_role: str
-    user_status: str
-
-class RosterResponse(BaseModel):
-    msg_type: str="RosterResponse"
-    roster: List[Client]
-"""
+# U > S
+class EndSessionRequest(BaseModel):
+    msg_type: str="EndSessionRequest"
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({
         "msg_type": "Registration Request",
-        "user_role": "H"
+        "user_role": "保健師"
         })
 
