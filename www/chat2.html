@@ -75,9 +75,9 @@ body {
 
             <!--メイン-->
             <v-row dense>
-                <v-col md="1" sm="2">
+                <v-col md="1" sm="2" xs="4">
                     <v-sheet class="mt-1 ml-1">
-                        <div class="mt-1 mx-1 pa-2 text-h5 text-center border">
+                        <div :class="`mt-1 mx-1 pa-2 text-h6 text-center border ${roleColor}`">
                             {{roleNameText}}
                         </div>
                         <!--入力操作-->
@@ -95,7 +95,7 @@ body {
                     </v-sheet>
                 </v-col>
 
-                <v-col md="11" sm=10>
+                <v-col md="11" sm="10" xs="8">
                     <!--入力-->
                     <div class="mt-1 mr-1 border">
                         <v-textarea
@@ -132,12 +132,12 @@ body {
                 >
                     <div v-for="item in chatHistory" :key="item.num">
                         <div v-if="item.num%2 == 1" :class="chatHistoryLeftStyle">
-                            <span class="mdi mdi-hospital-box"></span>
+                            <v-icon icon="mdi-account-tie-woman" size="large" :color="yourIconColor"></v-icon>
                             <span>{{item.message}}</span>
                         </div>
                         <div v-if="item.num%2 == 0" :class="chatHistoryRightStyle">
                             <span>{{item.message}}</span>
-                            <span class="mdi mdi-account"></span>
+                            <v-icon icon="mdi-account" size="large" :color="peerIconColor"></v-icon>
                         </div>
                     </div>
                 </v-sheet>
@@ -156,7 +156,7 @@ body {
             <v-toolbar title="操作メニュー">
                 <v-spacer></v-spacer>
                 <v-btn
-                    prepend-icon="mdi-close-box-outline"
+                    prepend-icon="mdi-window-close"
                     @click.stop="drawer = !drawer"
                     ></v-btn>
             </v-toolbar>
@@ -165,16 +165,20 @@ body {
 
             <v-list density="compact" nav>
 
-                <v-list-item>
+                <v-list-item
+                    title="ロール"
+                    >
                     <!-- ダイアログ -->
                     <v-dialog
-                        max-width="50vw"
                         v-model="registrationDialog"
                         persistent
+                        with="auto"
+                        max-width="400px"
                     >
                         <template v-slot:activator="{ props: activatorProps }">
                             <v-btn
-                                width="90%"
+                                density="default"
+                                block
                                 class="pa-2"
                                 :disabled="roleNameBtnDisabled"
                                 v-bind="activatorProps"
@@ -203,19 +207,16 @@ body {
                     </v-dialog>
                 </v-list-item>
 
-                <!--履歴操作-->
                 <v-list-item
-                    title="履歴の保存"
-                    @click="">
-                </v-list-item>
-
-                <v-list-item
+                    prepend-icon="mdi-file-document-check-outline"
                     title="会話の終了"
                     @click="">
                 </v-list-item>
 
+                <v-divider thickness="2" color="block" class="my-3"></v-divider>
+
                 <v-list-item
-                    title="字の大きさ"
+                    title="文字の大きさ"
                     >
                     <v-slider
                         v-model="chatHitsoryFontSizeNum"
@@ -226,12 +227,13 @@ body {
                         step="1"
                         show-ticks="always"
                         tick-size="2"
+                        width="large"
                     ></v-slider>
                 </v-list-item>
 
                 <v-list-item>
                     <v-checkbox
-                        label="改行で送信"
+                        label="　　改行で送信"
                         v-model="confSubmitWithEnter"
                         density="compact"
                         hide-details="true"
@@ -240,7 +242,7 @@ body {
 
                 <v-list-item>
                     <v-checkbox
-                        label="送信後クリア"
+                        label="　　送信後クリア"
                         v-model="confSubmitThenClear"
                         density="compact"
                         hide-details="true"
@@ -249,7 +251,8 @@ body {
 
                 <v-list-item
                     title="会話の最後へ"
-                    @click="chatHistoryToBottom"
+                    prepend-icon="mdi-arrow-collapse-down"
+                    @click="closeAndChatHistoryToBottom"
                     >
                 </v-list-item>
 
@@ -274,10 +277,10 @@ const vuetify = createVuetify();
 const app = createApp({
     data() {
         return {
-            debugAlone: true,
+            debugAlone: false,
             // conditions
             userId: null,
-            userStatus: this.debugAlone ? 'Established' : null,
+            userStatus: null,
             ws: null,
             protocol: null,
             host: null,
@@ -286,6 +289,7 @@ const app = createApp({
             roleNameBtnDisabled: false,
             registrationDialog: true,
             roleNameText: '━━━',
+            roleColor: '',
             roleNameDraft: null,
             registered: false,
             // chat history
@@ -311,10 +315,10 @@ const app = createApp({
     },
     computed: {
         chatHistoryLeftStyle: function() {
-            return `w-l ma-2 pa-2 ${this.chatHistoryFontSize} elevation-2`;
+            return `w-l mt-1 mx-1 pa-2 align-center ${this.chatHistoryFontSize} elevation-2`;
         },
         chatHistoryRightStyle: function() {
-            return `w-r ma-2 pa-2 ${this.chatHistoryFontSize} elevation-2`;
+            return `w-r mt-1 mx-1 pa-2 align-center ${this.chatHistoryFontSize} elevation-2`;
         },
         chatInputMaxSizeText: function() {
             return `質問を入力してください。(${this.chatInputMaxSize}文字以内)`;
@@ -324,6 +328,16 @@ const app = createApp({
         submitRegistrationDialog(value) {
             if (this.roleNameDraft !== null) {
                 this.roleNameText = this.roleNameDraft;
+                if (this.roleNameText == '保健師') {
+                    this.roleColor = 'bg-blue';
+                    this.yourIconColor = 'blue';
+                    this.peerIconColor = 'lime';
+                } else {
+                    this.roleColor = 'bg-lime';
+                    this.peerIconColor = 'lime';
+                    this.yourIconColor = 'lime';
+                    this.peerIconColor = 'blue';
+                }
                 this.roleNameBtnDisabled = true;
                 this.registrationDialog = false;
                 if (this.debugAlone) {
@@ -449,13 +463,16 @@ console.log("WS", ret);
             }
             this.chatHistoryToBottom();
         },
+        closeAndChatHistoryToBottom() {
+            this.drawer = !this.drawer;
+            this.chatHistoryToBottom();
+        },
         async chatHistoryToBottom() {
             // 履歴をスクロールさせる。
             // レンダリングされるまで少し待つ必要があるためsetTimeout()する。
             await new Promise(resolve => setTimeout(resolve, 300));
             const container = document.getElementById("divChatHistory");
             container.scrollTop = container.scrollHeight;
-            this.drawer = !this.drawer
         },
         changeFontSize(value) {
             if (value == 0) {
