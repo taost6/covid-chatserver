@@ -69,17 +69,67 @@ body {
                     ></v-btn>
             </v-toolbar>
 
-            <v-sheet class="my-1 mx-2 pa-2" color="grey-lighten-4">
+            <v-sheet class="mt-1 pa-2" color="grey-lighten-4">
                 {{MessageToUser}}
             </v-sheet>
+
+            <!--メイン-->
+            <v-row dense>
+                <v-col md="1" sm="2">
+                    <v-sheet class="mt-1 ml-1">
+                        <div class="mt-1 mx-1 pa-2 text-h5 text-center border">
+                            {{roleNameText}}
+                        </div>
+                        <!--入力操作-->
+                        <div class="mt-2 mx-1">
+                            <v-btn
+                                @click="submitChatInputText"
+                                density="default"
+                                block
+                                color="grey-lighten-4"
+                                size="x-large"
+                                text="送信"
+                                >
+                            </v-btn>
+                        </div>
+                    </v-sheet>
+                </v-col>
+
+                <v-col md="11" sm=10>
+                    <!--入力-->
+                    <div class="mt-1 mr-1 border">
+                        <v-textarea
+                            style="font-size: large"
+                            rows="4"
+                            v-model="chatInputText"
+                            outlined
+                            clearable
+                            clear-icon="mdi-close-circle"
+                            no-resize
+                            density="compact"
+                            hide-details="true"
+                            :counter="chatInputMaxSize"
+                            :rules="chatInputSizeCheck"
+                            :label="chatInputMaxSizeText"
+                            :disabled="chatInputDisabled"
+                            @input="chatInputSubmitWithEnter"
+                        ></v-textarea>
+                    </div>
+                </v-col>
+            </v-row>
 
             <!--履歴-->
             <v-sheet style="height: 75vh">
                 <!--会話履歴-->
-                <v-sheet class="my-1 mx-2 pa-2 text-h5" color="grey-lighten-4">
+                <v-sheet class="mt-1 mx-1 pa-2 text-h5 border" color="grey-lighten-4">
                     会話履歴
                 </v-sheet>
-                <v-sheet ref="divChatHistory" style="height: 69vh; overflow-x: hidden; overflow-y: auto;" class="my-1 mx-2 pa-2 border-thin">
+                <!--会話履歴メイン-->
+                <v-sheet
+                    id="divChatHistory"
+                    style="height: 69vh; overflow-x: hidden; overflow-y: auto;"
+                    class="my-1 mx-1 pa-2 border"
+                >
                     <div v-for="item in chatHistory" :key="item.num">
                         <div v-if="item.num%2 == 1" :class="chatHistoryLeftStyle">
                             <span class="mdi mdi-hospital-box"></span>
@@ -92,39 +142,6 @@ body {
                     </div>
                 </v-sheet>
             </v-sheet>
-
-            <!--メイン-->
-            <v-row dense>
-                <v-col cols="10">
-                    <!--入力-->
-                    <div class="mt-1 mx-2 border-thin">
-                        <v-textarea
-                            style="font-size: large"
-                            v-model="chatInputText"
-                            outlined
-                            clearable
-                            clear-icon="mdi-close-circle"
-                            no-resize
-                            rows="3"
-                            :counter="chatInputMaxSize"
-                            :label="chatInputMaxSizeText"
-                            :disabled="chatInputDisabled"
-                            @input="chatInputSubmitWithEnter"
-                        ></v-textarea>
-                    </div>
-                </v-col>
-                <v-col cols="2">
-                    <!--入力操作-->
-                    <div class="mt-1 mx-2">
-                        <v-btn style="width: 50%" class="pa-2"
-                            @click="submitChatInputText"
-                            density="default"
-                            text="送信"
-                            >
-                        </v-btn>
-                    </div>
-                </v-col>
-            </v-row>
 
         </v-main>
 
@@ -257,15 +274,18 @@ const vuetify = createVuetify();
 const app = createApp({
     data() {
         return {
+            debugAlone: true,
+            // conditions
             userId: null,
+            userStatus: this.debugAlone ? 'Established' : null,
             ws: null,
             protocol: null,
             host: null,
             drawer: false,
             // registraion
             roleNameBtnDisabled: false,
-            registrationDialog: false,
-            roleNameText: 'ロールの選択',
+            registrationDialog: true,
+            roleNameText: '━━━',
             roleNameDraft: null,
             registered: false,
             // chat history
@@ -273,12 +293,13 @@ const app = createApp({
             chatHistoryLastNum: 0,
             chatHitsoryFontSizeNum: 1,
             chatHistoryFontSize: 'text-h5',
-            chatInputText: '',
-            chatInputMaxSize: 150,
             // chat input
             chatInputDisabled: true,
-            confSubmitWithEnter: true,
+            confSubmitWithEnter: false,
             confSubmitThenClear: true,
+            chatInputText: '',
+            chatInputMaxSize: 150,
+            chatInputSizeCheck: [v => v.length <= this.chatInputMaxSize || `最大${this.chatInputMaxSize}文字`],
             //
             MessageToUser: 'ロールを選択してください。',
         };
@@ -305,6 +326,13 @@ const app = createApp({
                 this.roleNameText = this.roleNameDraft;
                 this.roleNameBtnDisabled = true;
                 this.registrationDialog = false;
+                if (this.debugAlone) {
+                    //一人デバッグ
+                    this.chatInputDisabled = false;
+                    this.userStatus = 'Established';
+                    this.MessageToUser = '一人デバッグモードです。';
+                    return;
+                }
                 this.startWebSocket();
             }
         },
@@ -319,10 +347,10 @@ const app = createApp({
             let url = `${this.protocol}://${this.host}/v1`;
             get_data(url, opt).then(res => {
                 this.userId = res.user_id;
-                this.status = res.user_status;
+                this.userStatus = res.user_status;
 console.log("HTTP", res);
                 if (res.msg_type == 'RegistrationSuccessful') {
-                    this.MessageToUser = '登録が完了しました。';
+                    this.MessageToUser = '登録が完了しました。相手を待っています。';
                 } else {
                     this.MessageToUser = 'ERROR';
                 }
@@ -336,8 +364,8 @@ console.log("WS", ret);
                     if (ret.msg_type == 'Prepared') {
                         this.MessageToUser = '相手を探しています。';
                     } else if (ret.msg_type == 'Established') {
-                        it.status = ret.user_status;
-                        it.MessageToUser = '相手の準備ができました。';
+                        it.userStatus = ret.user_status;
+                        it.MessageToUser = '相手の準備ができました。入力を開始できます。';
                         it.chatInputDisabled = false;
                     } else if (ret.msg_type == 'MessageForwarded') {
                         it.MessageToUser = '相手が応答しました。';
@@ -367,12 +395,12 @@ console.log("WS", ret);
         },
         submitChatInputText(value) {
             this.chatInputText = this.chatInputText.trim()
-            if (this.status != 'Established') {
+            if (this.userStatus != 'Established') {
                 this.MessageToUser = `相手が見つかっていません。しばらくお待ちください。`;
                 return;
             }
             if (!this.chatInputText) {
-                this.MessageToUser = `メッセージを何か入力してください。`;
+                this.MessageToUser = `何か入力してください。`;
                 return;
             }
             if (this.chatInputLock) {
@@ -393,8 +421,11 @@ console.log("WS", ret);
             });
             this.chatHistoryToBottom();
             // response
-            //this.getChatResponseDebug(this.chatInputText);
-            this.getChatResponse(this.chatInputText);
+            if (this.debugAlone) {
+                this.getChatResponseDebug(this.chatInputText);
+            } else {
+                this.getChatResponse(this.chatInputText);
+            }
         },
         async getChatResponse(input_text) {
             await this.ws.send(JSON.stringify({
@@ -406,7 +437,7 @@ console.log("WS", ret);
         async getChatResponseDebug(input_text) {
             //デバッグ用
             await new Promise(resolve => setTimeout(resolve, 3000));
-            response = `${input_text} は分かりません。`;
+            response = `「${input_text}」と言いましたね。`;
             this.chatHistory.push({
                 num: this.chatHistoryLastNum + 2,
                 message: response,
@@ -420,11 +451,11 @@ console.log("WS", ret);
         },
         async chatHistoryToBottom() {
             // 履歴をスクロールさせる。
-            // いまいちな感じ。
-            // setTimeout()は、レンダリングされるまで少し待つ必要があるため。
+            // レンダリングされるまで少し待つ必要があるためsetTimeout()する。
             await new Promise(resolve => setTimeout(resolve, 300));
-            let children = this.$refs.divChatHistory.children;
-            children[children.length-1].scrollIntoView({ behavior: 'instant', block: 'end' });
+            const container = document.getElementById("divChatHistory");
+            container.scrollTop = container.scrollHeight;
+            this.drawer = !this.drawer
         },
         changeFontSize(value) {
             if (value == 0) {
