@@ -120,6 +120,7 @@ class MessageRejected(BaseModel):
 # U > S
 class EndSessionRequest(BaseModel):
     msg_type: str="EndSessionRequest"
+    user_id: str
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({
