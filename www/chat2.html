@@ -210,13 +210,28 @@ body {
                     </v-dialog>
                 </v-list-item>
 
+                <!-- 会話の終了 -->
                 <v-list-item
                     id="submitEndOfSession"
                     class="mt-2 mr-2"
                     prepend-icon="mdi-file-document-check-outline"
-                    title="会話の終了"
                     variant="outlined"
-                    @click="submitEndSessionRequest">
+                >
+		    <v-btn @click="confirmEndSessionDialog = true">会話の終了</v-btn>
+		    <v-dialog v-model="confirmEndSessionDialog" max-width="400">
+			<v-card>
+			    <v-card-title>
+				会話を終了しますか？
+			    </v-card-title>
+			    <v-card-text>
+			    </v-card-text>
+			    <v-card-actions>
+			    <v-spacer></v-spacer>
+				<v-btn @click="cancelEndSessionRequest">続ける</v-btn>
+				<v-btn @click="submitEndSessionRequest">終了する</v-btn>
+			    </v-card-actions>
+			</v-card>
+                    </v-dialog>
                 </v-list-item>
 
                 <v-divider thickness="2" color="block" class="my-3"></v-divider>
@@ -283,14 +298,16 @@ const vuetify = createVuetify();
 const app = createApp({
     data() {
         return {
+            // system
             debugAlone: false,
-            // conditions
-            userId: null,
-            userStatus: null,
+            drawer: false,
             ws: null,
             protocol: null,
             host: null,
-            drawer: false,
+            MessageToUser: 'ロールを選択してください。',
+            // user conditions
+            userId: null,
+            userStatus: null,
             // registraion
             roleNameBtnDisabled: false,
             registrationDialog: true,
@@ -309,8 +326,8 @@ const app = createApp({
             chatInputText: '',
             chatInputMaxSize: 150,
             chatInputSizeCheck: [v => v.length <= this.chatInputMaxSize || `最大${this.chatInputMaxSize}文字`],
-            //
-            MessageToUser: 'ロールを選択してください。',
+            // end of session
+            confirmEndSessionDialog: false,
         };
     },
     mounted() {
@@ -461,7 +478,12 @@ console.log("WS", ret);
                 this.getChatResponse(this.chatInputText);
             }
         },
+        cancelEndSessionRequest(value) {
+            this.confirmEndSessionDialog = false;
+            this.drawer = false;
+        },
         async submitEndSessionRequest(value) {
+            this.confirmEndSessionDialog = false;
             this.drawer = false;
             // サーバから削除する。
             await this.ws.send(JSON.stringify({
