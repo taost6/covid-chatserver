@@ -16,6 +16,10 @@ class OpenAIAssistantWrapper():
         thread = await self.client.beta.threads.create()
         return thread.id
 
+    async def delete_thread(self, thread: AIPatient):
+        status = await self.client.beta.threads.delete(thread.thread_id)
+        return status
+
     async def send_message(self,
                            thread: AIPatient,
                            request_text: str,
