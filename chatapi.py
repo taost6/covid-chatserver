@@ -46,16 +46,13 @@ def api(config):
         )
 
     """
-    UserDef:
-        user_id: str
-        role: str
-        status: str
-        ws: ws
-    waiting = { <user_id>: UserDef }
+    waiting = { <user_id>: UserDef, ... }
     session = {
-        <session_id>: [ UserDef, ...]
-        conv
-        }
+        <session_id>: {
+            users: [UserDef, UserDef|AssistantDef],
+            history: [MessageInfo, ...],
+        }, ...
+    }
     """
     users_waiting = {}
     users_session = {}
