@@ -31,6 +31,9 @@ def api(config):
     config.queue._loop = config.loop
     # create OpenAI API wrapper
     oaw = OpenAIAssistantWrapper(config)
+    # 
+    config.assistant_list = json.load(open(config.assistants_storage,
+                                           encoding="utf-8"))
 
     app = FastAPI()
 
@@ -78,7 +81,8 @@ def api(config):
         elif user.role == "保健師":
             peer_role = "患者"
         else:
-            raise ValueError(f"ERROR: invalid user role {user.role}")
+            logger.error(f"ERROR: invalid user role {user.role}")
+            return None
 
         for u in users_waiting.values():
             if u.role == peer_role and u.status == Status.Prepared.name:
@@ -89,14 +93,10 @@ def api(config):
     def _find_peer_ai(user: UserDef) -> AssistantDef:
         if user.role != "保健師":
             return None
-        assistants = [
-                "asst_3QFD4I5A1io0Xi8iCwgUGVHA",
-                "asst_v02UQiLMtOeyPvzcn9Wrbmd2",
-                ]
         return AssistantDef(
                 user_id = get_id(),
                 role = "患者",
-                assistant_id = choice(assistants),
+                assistant_id = choice(config.assistant_list),
                 )
 
     async def _session_human(user: UserDef):
