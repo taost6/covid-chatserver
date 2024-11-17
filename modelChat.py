@@ -118,33 +118,37 @@ class PreparationRejected(BaseModel):
 class Established(BaseModel):
     msg_type: str=MsgType.Established.name
     user_status: str=Status.Established.name
-    peer_id: str
+    session_id: str
 
 # U > S
 class MessageSubmitted(BaseModel):
     msg_type: str=MsgType.MessageSubmitted.name
+    session_id: str
     user_id: str
     user_msg: str
 
 # S > U
 class MessageForwarded(BaseModel):
     msg_type: str=MsgType.MessageForwarded.name
-    peer_id: str
+    session_id: str
     user_msg: str
 
 # S > U
 class MessageRejected(BaseModel):
     msg_type: str=MsgType.MessageRejected.name
+    session_id: str
     reason: str
 
 # U > S
 class EndSessionRequest(BaseModel):
     msg_type: str=MsgType.EndSessionRequest.name
+    session_id: str
     user_id: str
 
 # S > U
 class SessionTerminated(BaseModel):
     msg_type: str=MsgType.SessionTerminated.name
+    session_id: str
     reason: str
 
 if __name__ == "__main__":

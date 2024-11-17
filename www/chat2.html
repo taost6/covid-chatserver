@@ -78,7 +78,7 @@ body {
 
             <!--メイン-->
             <v-row dense>
-                <v-col md="1" sm="2" xs="4">
+                <v-col md="2" sm="2" xs="4">
                     <v-sheet class="mt-1 ml-1">
                         <div :class="`mt-1 mx-1 pa-2 text-h6 text-center border ${roleColor}`">
                             {{roleNameText}}
@@ -98,7 +98,7 @@ body {
                     </v-sheet>
                 </v-col>
 
-                <v-col md="11" sm="10" xs="8">
+                <v-col md="10" sm="10" xs="8">
                     <!--入力-->
                     <div class="mt-1 mr-1 border">
                         <v-textarea
@@ -308,6 +308,7 @@ const app = createApp({
             // user conditions
             userId: null,
             userStatus: null,
+            sessionId: null,
             // registraion
             roleNameBtnDisabled: false,
             registrationDialog: true,
@@ -351,6 +352,7 @@ const app = createApp({
             // 初期化
             this.userId = null;
             this.userStatus = null;
+            this.sessionId = null;
             this.roleNameText = '━━━';
             this.roleColor = '';
             this.roleNameDraft = null;
@@ -411,6 +413,7 @@ console.log("WS", ret);
                     if (ret.msg_type == 'Prepared') {
                         it.MessageToUser = '相手を探しています。';
                     } else if (ret.msg_type == 'Established') {
+                        it.sessionId = ret.session_id;
                         it.userStatus = ret.user_status;
                         it.MessageToUser = '相手の準備ができました。入力を開始できます。';
                         it.chatInputDisabled = false;
@@ -488,12 +491,14 @@ console.log("WS", ret);
             // サーバから削除する。
             await this.ws.send(JSON.stringify({
                 msg_type: 'EndSessionRequest',
+                session_id: this.sessionId,
                 user_id: this.userId,
             }));
         },
         async getChatResponse(input_text) {
             await this.ws.send(JSON.stringify({
                 msg_type: 'MessageSubmitted',
+                session_id: this.sessionId,
                 user_id: this.userId,
                 user_msg: input_text,
             }));

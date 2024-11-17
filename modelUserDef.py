@@ -1,18 +1,21 @@
 from pydantic import BaseModel, Field
 from typing import Literal, Union, List, Optional, Any
 
-class AIPatient(BaseModel):
-    user_id: str    = Field(description="Identifier exposed to the peer")
-    patient_id: str = Field(description="Patient ID to be communicated.")
+class AssistantDef(BaseModel):
+    user_id: str      = Field(description="Identifier exposed to the peer")
+    role: Literal["保健師","患者"] = Field(description="Assistant Role")
+    assistant_id: str = Field(description="Assistant ID to be communicated.")
     thread_id: Optional[str] = Field(None,
             description="Thread Idenfifier of OpenAI API")
 
 class UserDef(BaseModel):
-    user_id: str   = Field(description="User ID")
-    role: str      = Field(description="User Role")
-    status: str    = Field(description="User Status")
-    ws: Any = None = Field(description="Placeholder of WebSocket session")
+    user_id: str = Field(description="User ID")
+    role: Literal["保健師","患者"] = Field(description="Assistant Role")
+    status: str  = Field(description="User Status")
+    ws: Any      = Field(None, description="Placeholder of WebSocket session")
 
 if __name__ == "__main__":
-    AIPatient(user_id="aaa", patient_id="bbb")
-    AIPatient(user_id="aaa", patient_id="bbb", thread_id="ccc")
+    AssistantDef(user_id="aaa", role="患者", assistant_id="bbb")
+    a = AssistantDef(user_id="aaa", role="患者", assistant_id="bbb",
+                     thread_id="ccc")
+    a.model_dump().get("user_id")

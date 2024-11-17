@@ -4,10 +4,13 @@ from fastapi import status as httpcode
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from typing import Union
+from pydantic import BaseModel
+from typing import List
 from modelChat import *
 from modelUserDef import *
-import aiofile
+from modelHistory import *
+import aiofiles
+import json
 import dateutil.parser
 import asyncio
 from openai_assistant import OpenAIAssistantWrapper
@@ -15,6 +18,10 @@ from uuid import uuid4
 from datetime import datetime
 from random import random, choice
 from hashlib import sha1
+
+class Session(BaseModel):
+    users: List[Union[UserDef,AssistantDef]]
+    history: History
 
 def api(config):
 
@@ -39,21 +46,35 @@ def api(config):
         )
 
     """
-    users ={ <user_id>: UserDef }
     UserDef:
         user_id: str
         role: str
         status: str
         ws: ws
-        peer: Union[UserDef
+    waiting = { <user_id>: UserDef }
+    session = {
+        <session_id>: [ UserDef, ...]
+        conv
+        }
     """
-    users = {}
+    users_waiting = {}
+    users_session = {}
 
-    def get_user_id() -> str:
+    def get_id() -> str:
+        """
+        user_id
+        session_id
+        """
         base = f"{datetime.now().timestamp()}-{random()}"
         return sha1(base.encode()).hexdigest()
 
-    def _find_peer_human(user: UserDef):
+    async def _save_history(session_id: str, history: History) -> None:
+        filename = f"history-{session_id}.json"
+        async with aiofiles.open(filename, "w", encoding="utf-8") as fd:
+            await fd.write(json.dumps(history.model_dump(), ensure_ascii=False))
+        logger.debug(f"History has been saved {filename}")
+
+    def _find_peer_human(user: UserDef) -> UserDef:
         # find a peer
         if user.role == "患者":
             peer_role = "保健師"
@@ -62,21 +83,23 @@ def api(config):
         else:
             raise ValueError(f"ERROR: invalid user role {user.role}")
 
-        for u in users.values():
+        for u in users_waiting.values():
             if u.role == peer_role and u.status == Status.Prepared.name:
                 return u
         else:
             return None
 
-    def _find_peer_ai(user: UserDef):
+    def _find_peer_ai(user: UserDef) -> AssistantDef:
         if user.role != "保健師":
             return None
         assistants = [
                 "asst_3QFD4I5A1io0Xi8iCwgUGVHA",
+                "asst_v02UQiLMtOeyPvzcn9Wrbmd2",
                 ]
-        return AIPatient(
-                user_id = get_user_id(),
-                patient_id = choice(assistants),
+        return AssistantDef(
+                user_id = get_id(),
+                role = "患者",
+                assistant_id = choice(assistants),
                 )
 
     async def _session_human(user: UserDef):
@@ -86,42 +109,55 @@ def api(config):
                 data = await user.ws.receive_json()
                 if data["msg_type"] == MsgType.MessageSubmitted.name:
                     m = MessageSubmitted.model_validate(data)
-                    peer = users[m.user_id].peer
-                    if peer is not None:
-                        await peer.ws.send_json(
-                                MessageForwarded(
-                                    peer_id=m.user_id,
-                                    user_msg=m.user_msg
-                                ).dict())
+                    session = users_session.get(m.session_id)
+                    if session is not None:
+                        for u in session.users:
+                            if u.user_id == m.user_id:
+                                session.history.history.append(
+                                        MessageInfo.model_validate({
+                                            "role": u.role,
+                                            "text": m.user_msg
+                                            }))
+                            else:
+                                await u.ws.send_json(
+                                        MessageForwarded(
+                                            session_id=m.session_id,
+                                            user_msg=m.user_msg
+                                        ).dict())
                     else:
-                        raise ValueError(f"ERROR: peer doesn't exit {user}")
+                        await user.ws.send_json(
+                                MessageRejected(
+                                    reason="ERROR: Invalid Session ID",
+                                ).dict())
                 elif data["msg_type"] == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
-                    user = users.get(m.user_id)
-                    if user is None:
+                    session = users_session.get(m.session_id)
+                    if session is not None:
+                        for u in session.users:
+                            if u.user_id == m.user_id:
+                                # close my session
+                                await u.ws.send_json(
+                                        SessionTerminated(
+                                            session_id=m.session_id,
+                                            reason="EndSession request is accpepted.",
+                                        ).dict())
+                            else:
+                                # close peer's session
+                                await u.ws.send_json(
+                                        SessionTerminated(
+                                            session_id=m.session_id,
+                                            reason="Peer sent the end of session.",
+                                        ).dict())
+                            await u.ws.close()
+                        # store history
+                        await _save_history(m.session_id, session.history)
+                        del users_session[m.session_id]
+                        break
+                    else:
                         await user.ws.send_json(
                                 MessageRejected(
                                     reason="ERROR: Invalid Message Type",
                                 ).dict())
-                    else:
-                        # close peer's ws session
-                        if user.peer is not None:
-                            await user.peer.ws.send_json(
-                                    SessionTerminated(
-                                        reason="Peer sent the end of session.",
-                                    ).dict())
-                            await user.peer.ws.close()
-                            user.peer.peer = None
-                            del users[user.peer.user_id]
-                            user.peer = None
-                        # close user's ws session
-                        await user.ws.send_json(
-                                SessionTerminated(
-                                    reason="EndSessionRequest is accepted.",
-                                ).dict())
-                        await user.ws.close()
-                        del users[user.user_id]
-                        break
                 else:
                     await user.ws.send_json(
                             MessageRejected(
@@ -153,12 +189,63 @@ def api(config):
                 data = await user.ws.receive_json()
                 if data["msg_type"] == MsgType.MessageSubmitted.name:
                     m = MessageSubmitted.model_validate(data)
-                    response_msg = await oaw.send_message(user.peer, m.user_msg)
-                    await user.ws.send_json(
-                            MessageForwarded(
-                                peer_id=user.peer.user_id,
-                                user_msg=response_msg,
-                            ).dict())
+                    session = users_session.get(m.session_id)
+                    if session is not None:
+                        for u in session.users:
+                            if u.user_id == m.user_id:
+                                session.history.history.append(
+                                        MessageInfo.model_validate({
+                                            "role": u.role,
+                                            "text": m.user_msg
+                                            }))
+                                continue
+                            if u.model_dump().get("thread_id") is not None:
+                                # send message to AI
+                                response_msg = await oaw.send_message(
+                                        u, m.user_msg)
+                                # add response to history
+                                session.history.history.append(
+                                        MessageInfo.model_validate({
+                                            "role": u.role,
+                                            "text": response_msg,
+                                            }))
+                                # reply to Human
+                                await user.ws.send_json(
+                                    MessageForwarded(
+                                        session_id=m.session_id,
+                                        user_msg=response_msg,
+                                    ).dict())
+                    else:
+                        await user.ws.send_json(
+                                MessageRejected(
+                                    reason="ERROR: Invalid Session ID",
+                                ).dict())
+                elif data["msg_type"] == MsgType.EndSessionRequest.name:
+                    m = EndSessionRequest.model_validate(data)
+                    session = users_session.get(m.session_id)
+                    if session is not None:
+                        for u in session.users:
+                            if u.user_id == m.user_id:
+                                await u.ws.send_json(
+                                        SessionTerminated(
+                                            session_id=m.session_id,
+                                            reason="End Session is accepted.",
+                                        ).dict())
+                                await u.ws.close()
+                                continue
+                            if u.model_dump().get("thread_id") is not None:
+                                # close AI session
+                                status = await oaw.delete_thread(u)
+                                logger.debug(f"OPENAI Delete Thread {status}")
+                        # store history
+                        await _save_history(m.session_id, session.history)
+                        del users_session[m.session_id]
+                        break
+                    else:
+                        await user.ws.send_json(
+                                MessageRejected(
+                                    reason="ERROR: Invalid Message Type",
+                                ).dict())
                 else:
                     await user.ws.send_json(
                             MessageRejected(
@@ -173,17 +260,9 @@ def api(config):
         """
 
     def _registration(req: RegistrationRequest):
-        for i in range(3):
-            user_id = get_user_id()
-            if not users.get(user_id):
-                break
-        else:
-            return Rejected(
-                msg_type=MsgType.RegistrationRejected.name,
-                user_status=Status.Initial.name,
-                )
+        user_id = get_id()
         #
-        users[user_id] = UserDef(
+        users_waiting[user_id] = UserDef(
                 user_id=user_id,
                 role=req.user_role,
                 status=Status.Registered.name,
@@ -221,7 +300,7 @@ def api(config):
     @app.websocket("/v1/ws/{user_id}")
     async def websocket_endpoint(user_id: str, ws: WebSocket):
         print(f"user_id: {user_id}")
-        if users.get(user_id) is None:
+        if users_waiting.get(user_id) is None:
             return PreparationRejected(
                     reason=f"Invalid user ID {user_id}"
                     )
@@ -229,34 +308,50 @@ def api(config):
         try:
             await ws.accept()
 
-            user = users[user_id]
+            user = users_waiting[user_id]
             user.ws = ws
             user.status = Status.Prepared.name
 
             peer = _find_peer_human(user)
             if peer:
+                # make a session
+                session_id = get_id()
+                users_session[session_id] = Session.model_validate({
+                    "users": [user, peer],
+                    "history": History.model_validate({})
+                    })
+                del users_waiting[user.user_id]
+                del users_waiting[peer.user_id]
                 # vs human
                 peer.status = Status.Established.name
-                peer.peer = user
                 await peer.ws.send_json(
-                    Established(peer_id=user.user_id).dict()
+                    Established(session_id=session_id).dict()
                     )
                 #
                 user.status = Status.Established.name
-                user.peer = peer
                 await user.ws.send_json(
-                    Established(peer_id=peer.user_id).dict()
+                    Established(session_id=session_id).dict()
                     )
                 await _session_human(user)
             else:
-                peer = _find_peer_ai(user)
-                if peer:
+                assistant = _find_peer_ai(user)
+                if assistant:
+                    session_id = get_id()
+                    history = History.model_validate({
+                            "assistant": {
+                                "role": "患者",
+                                "assistant_id": assistant.assistant_id,
+                            }})
+                    users_session[session_id] = Session.model_validate({
+                        "users": [user, assistant],
+                        "history": history,
+                        })
+                    del users_waiting[user.user_id]
                     # vs ai
                     user.status = Status.Established.name
-                    user.peer = peer
-                    peer.thread_id = await oaw.create_thread()
+                    assistant.thread_id = await oaw.create_thread()
                     await user.ws.send_json(
-                        Established(peer_id=user.peer.user_id).dict()
+                        Established(session_id=session_id).dict()
                         )
                     await _session_ai(user)
                 else:
