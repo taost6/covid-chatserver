@@ -15,10 +15,8 @@ python retry_check_result.py  chat_history_056-20241019-retry01.json
 
 ## TODO
 
-openaiとのインタラクション
-
 ## requirement
 
 openai
 fastapi
-
+aiofiles
