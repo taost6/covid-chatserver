@@ -12,26 +12,9 @@ import dateutil.parser
 import asyncio
 from openai_assistant import OpenAIAssistantWrapper
 from uuid import uuid4
-from enum import Enum, auto
 from datetime import datetime
 from random import random, choice
 from hashlib import sha1
-
-class MsgType(Enum):
-    RegistrationRequest = 0
-    Registered = 1
-    Prepared = 2
-    Establised = 3
-    MessageSubmitted = 201
-    MessageForwarded = 202
-    RegistrationRejected = 401
-    PreparationRejected = 402
-
-class Status(Enum):
-    Initial = 1
-    Registered = 2
-    Prepared = 3
-    Established = 4
 
 def api(config):
 
@@ -112,17 +95,55 @@ def api(config):
                                 ).dict())
                     else:
                         raise ValueError(f"ERROR: peer doesn't exit {user}")
+                elif data["msg_type"] == MsgType.EndSessionRequest.name:
+                    m = EndSessionRequest.model_validate(data)
+                    user = users.get(m.user_id)
+                    if user is None:
+                        await user.ws.send_json(
+                                MessageRejected(
+                                    reason="ERROR: Invalid Message Type",
+                                ).dict())
+                    else:
+                        # close peer's ws session
+                        if user.peer is not None:
+                            await user.peer.ws.send_json(
+                                    SessionTerminated(
+                                        reason="Peer sent the end of session.",
+                                    ).dict())
+                            await user.peer.ws.close()
+                            user.peer.peer = None
+                            del users[user.peer.user_id]
+                            user.peer = None
+                        # close user's ws session
+                        await user.ws.send_json(
+                                SessionTerminated(
+                                    reason="EndSessionRequest is accepted.",
+                                ).dict())
+                        await user.ws.close()
+                        del users[user.user_id]
+                        break
                 else:
                     await user.ws.send_json(
                             MessageRejected(
                                 reason="ERROR: Invalid Message Type",
                             ).dict())
+
         """
         except Exception as e:
-            print(e)
-            # If a user disconnects, remove them from the dictionary
-            await user.ws.close()
-            del users[user_id]
+            logger.debug(f"WS Exception: {user.user_id}")
+            # close peer's ws session
+            if user.peer is not None:
+                await user.peer.ws.send_json(
+                        SessionTerminated(
+                            reason="Peer sent the end of session.",
+                        ).dict())
+                await user.peer.ws.close()
+                user.peer.peer = None
+                del users[user.peer.user_id]
+                user.peer = None
+            # close user's ws session
+            if users.get(user.user_id):
+                del users[user.user_id]
         """
 
     async def _session_ai(user: UserDef):
@@ -168,7 +189,7 @@ def api(config):
                 status=Status.Registered.name,
                 )
         #
-        return Registered(
+        return RegistrationAccepted(
             #msg_type=MsgType.Registered.name,
             #user_status=Status.Registered.name,
             user_id=user_id,
@@ -245,8 +266,7 @@ def api(config):
                             )
                     await _session_human(user)
         except WebSocketDisconnect as e:
-            print("XXX")
-            print(e)
+            logger.debug(f"WS Exception: {user.user_id} {e}")
 
     #
     from fastapi.staticfiles import StaticFiles

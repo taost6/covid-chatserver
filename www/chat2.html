@@ -54,6 +54,9 @@ body {
     display: flex;
     justify-content: right;
 }
+#submitEndOfSession.v-list-item--variant-outlined {
+    border: 2px solid #ff0000 !important;
+}
 </style>
 
 <div id="app">
@@ -208,9 +211,12 @@ body {
                 </v-list-item>
 
                 <v-list-item
+                    id="submitEndOfSession"
+                    class="mt-2 mr-2"
                     prepend-icon="mdi-file-document-check-outline"
                     title="会話の終了"
-                    @click="">
+                    variant="outlined"
+                    @click="submitEndSessionRequest">
                 </v-list-item>
 
                 <v-divider thickness="2" color="block" class="my-3"></v-divider>
@@ -291,7 +297,6 @@ const app = createApp({
             roleNameText: '━━━',
             roleColor: '',
             roleNameDraft: null,
-            registered: false,
             // chat history
             chatHistory: [],
             chatHistoryLastNum: 0,
@@ -325,6 +330,17 @@ const app = createApp({
         },
     },
     methods: {
+        sessionInitialized() {
+            // 初期化
+            this.userId = null;
+            this.userStatus = null;
+            this.roleNameText = '━━━';
+            this.roleColor = '';
+            this.roleNameDraft = null;
+            this.chatHistory = [];
+            this.chatHistoryLastNum = 0;
+            this.registrationDialog = true;
+        },
         submitRegistrationDialog(value) {
             if (this.roleNameDraft !== null) {
                 this.roleNameText = this.roleNameDraft;
@@ -363,7 +379,7 @@ const app = createApp({
                 this.userId = res.user_id;
                 this.userStatus = res.user_status;
 console.log("HTTP", res);
-                if (res.msg_type == 'RegistrationSuccessful') {
+                if (res.msg_type == 'RegistrationAccepted') {
                     this.MessageToUser = '登録が完了しました。相手を待っています。';
                 } else {
                     this.MessageToUser = 'ERROR';
@@ -376,7 +392,7 @@ console.log("HTTP", res);
                     ret = JSON.parse(event.data);
 console.log("WS", ret);
                     if (ret.msg_type == 'Prepared') {
-                        this.MessageToUser = '相手を探しています。';
+                        it.MessageToUser = '相手を探しています。';
                     } else if (ret.msg_type == 'Established') {
                         it.userStatus = ret.user_status;
                         it.MessageToUser = '相手の準備ができました。入力を開始できます。';
@@ -393,6 +409,10 @@ console.log("WS", ret);
                             it.chatInputText = '';
                         }
                         it.chatHistoryToBottom();
+                    } else if (ret.msg_type == 'SessionTerminated') {
+                        it.MessageToUser = '接続が切れました。ロールの選択からはじめてください。';
+                        it.ws = null;
+                        it.sessionInitialized();
                     }
                 }
             });
@@ -441,6 +461,14 @@ console.log("WS", ret);
                 this.getChatResponse(this.chatInputText);
             }
         },
+        async submitEndSessionRequest(value) {
+            this.drawer = false;
+            // サーバから削除する。
+            await this.ws.send(JSON.stringify({
+                msg_type: 'EndSessionRequest',
+                user_id: this.userId,
+            }));
+        },
         async getChatResponse(input_text) {
             await this.ws.send(JSON.stringify({
                 msg_type: 'MessageSubmitted',
@@ -464,7 +492,7 @@ console.log("WS", ret);
             this.chatHistoryToBottom();
         },
         closeAndChatHistoryToBottom() {
-            this.drawer = !this.drawer;
+            this.drawer = false;
             this.chatHistoryToBottom();
         },
         async chatHistoryToBottom() {

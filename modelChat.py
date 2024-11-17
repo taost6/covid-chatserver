@@ -1,5 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal, Union, List, Optional, Any
+from enum import Enum
 
 """
 ## 状態遷移
@@ -67,60 +68,84 @@ Z. セッションを終了する。
 
 """
 
+class MsgType(Enum):
+    RegistrationRequest = 0
+    RegistrationAccepted = 1
+    Prepared = 2
+    Established = 3
+    EndSessionRequest = 4
+    SessionTerminated = 5
+    MessageSubmitted = 201
+    MessageForwarded = 202
+    MessageRejected = 203
+    RegistrationRejected = 401
+    PreparationRejected = 402
+
+class Status(Enum):
+    Initial = 1
+    Registered = 2
+    Prepared = 3
+    Established = 4
+
 # C > S
 class RegistrationRequest(BaseModel):
-    msg_type: str="RegistrationRequest"
+    msg_type: str=MsgType.RegistrationRequest.name
     user_role: Literal["保健師", "患者"]
 
 # S > U
-class Registered(BaseModel):
-    msg_type: str="RegistrationSuccessful"
-    user_status: str="Prepared"
+class RegistrationAccepted(BaseModel):
+    msg_type: str=MsgType.RegistrationAccepted.name
+    user_status: str=Status.Prepared.name
     user_id: str
 
 # S > U
 class RegistrationRejected(BaseModel):
-    msg_type: str="RegistrationRejected"
-    user_status: str="Initial"
+    msg_type: str=MsgType.RegistrationRejected.name
+    user_status: str=Status.Initial.name
 
 # S > U
 class Prepared(BaseModel):
-    msg_type: str="Prepared"
-    user_status: str="Prepared"
+    msg_type: str=MsgType.Prepared.name
+    user_status: str=Status.Prepared.name
 
 # S > U
 class PreparationRejected(BaseModel):
-    msg_type: str="PreparationRejected"
-    user_status: str="Registered"
+    msg_type: str=MsgType.PreparationRejected.name
+    user_status: str=Status.Registered.name
     reason: str
 
 # S > U
 class Established(BaseModel):
-    msg_type: str="Established"
-    user_status: str="Established"
+    msg_type: str=MsgType.Established.name
+    user_status: str=Status.Established.name
     peer_id: str
 
 # U > S
 class MessageSubmitted(BaseModel):
-    msg_type: str="MessageSubmitted"
+    msg_type: str=MsgType.MessageSubmitted.name
     user_id: str
     user_msg: str
 
 # S > U
 class MessageForwarded(BaseModel):
-    msg_type: str="MessageForwarded"
+    msg_type: str=MsgType.MessageForwarded.name
     peer_id: str
     user_msg: str
 
 # S > U
 class MessageRejected(BaseModel):
-    msg_type: str="MessageRejected"
+    msg_type: str=MsgType.MessageRejected.name
     reason: str
 
 # U > S
 class EndSessionRequest(BaseModel):
-    msg_type: str="EndSessionRequest"
+    msg_type: str=MsgType.EndSessionRequest.name
     user_id: str
+
+# S > U
+class SessionTerminated(BaseModel):
+    msg_type: str=MsgType.SessionTerminated.name
+    reason: str
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({
