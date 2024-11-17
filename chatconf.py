@@ -7,7 +7,7 @@ from setlogger import set_logger
 import json
 
 class ChatConfigModel(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
     server_cert: Optional[str]
     server_address: str = ""
     server_port: int = 8889
@@ -17,10 +17,8 @@ class ChatConfigModel(BaseModel):
     log_stdout: bool = False
     enable_debug: bool = False
     tz: str = "Asia/Tokyo"
-    logger: Any = None
-    loop: Any = None
-    queue: Any = None
     max_queue_size: int = 100
+    assistants_storage: str
 
 def __from_args(args):
     ap = ArgumentParser(
