@@ -430,6 +430,8 @@ console.log("WS", ret);
                         }
                         it.chatHistoryToBottom();
                     } else if (ret.msg_type == 'SessionTerminated') {
+                        // サーバ側でWSをクローズするためにACKが必要。
+                        it.submitEndSessionRequest();
                         it.MessageToUser = '接続が切れました。ロールの選択からはじめてください。';
                         it.ws = null;
                         it.sessionInitialized();

@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Body, Request, HTTPException
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect, WebSocketDisconnect
 from fastapi import status as httpcode
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.encoders import jsonable_encoder
@@ -22,6 +22,7 @@ from hashlib import sha1
 class Session(BaseModel):
     users: List[Union[UserDef,AssistantDef]]
     history: History
+    session_id: str
 
 def api(config):
 
@@ -71,7 +72,7 @@ def api(config):
     async def _save_history(session_id: str, history: History) -> None:
         filename = f"history-{session_id}.json"
         async with aiofiles.open(filename, "w", encoding="utf-8") as fd:
-            await fd.write(json.dumps(history.model_dump(), ensure_ascii=False))
+            await fd.write(json.dumps(history.model_dump(exclude={'session_id'}), ensure_ascii=False))
         logger.debug(f"History has been saved {filename}")
 
     def _find_peer_human(user: UserDef) -> UserDef:
@@ -99,9 +100,16 @@ def api(config):
                 assistant_id = choice(config.assistant_list),
                 )
 
+    def _find_user_session(user: UserDef) -> Session:
+        for s in users_session.values():
+            for u in s.users:
+                if u.user_id == user.user_id:
+                    return s
+        else:
+            return None
+
     async def _session_human(user: UserDef):
-        #try:
-        if True:
+        try:
             while True:
                 data = await user.ws.receive_json()
                 if data["msg_type"] == MsgType.MessageSubmitted.name:
@@ -131,6 +139,8 @@ def api(config):
                     session = users_session.get(m.session_id)
                     if session is not None:
                         for u in session.users:
+                            if u.ws is None:
+                                continue
                             if u.user_id == m.user_id:
                                 # close my session
                                 await u.ws.send_json(
@@ -161,23 +171,20 @@ def api(config):
                                 reason="ERROR: Invalid Message Type",
                             ).dict())
 
-        """
-        except Exception as e:
-            logger.debug(f"WS Exception: {user.user_id}")
-            # close peer's ws session
-            if user.peer is not None:
-                await user.peer.ws.send_json(
-                        SessionTerminated(
-                            reason="Peer sent the end of session.",
-                        ).dict())
-                await user.peer.ws.close()
-                user.peer.peer = None
-                del users[user.peer.user_id]
-                user.peer = None
-            # close user's ws session
-            if users.get(user.user_id):
-                del users[user.user_id]
-        """
+        except WebSocketDisconnect as e:
+            logger.debug(f"WS Exception: {user.user_id} {e}")
+            s = _find_user_session(user)
+            if s is not None:
+                for peer in s.users:
+                    if peer.user_id != user.user_id:
+                        await peer.ws.send_json(
+                                SessionTerminated(
+                                    session_id=s.session_id,
+                                    reason="Peer sent the end of session.",
+                                ).dict())
+                user.ws = None
+            # delete session and userdef
+            del s
 
     async def _session_ai(user: UserDef):
         #try:
@@ -239,10 +246,11 @@ def api(config):
                         del users_session[m.session_id]
                         break
                     else:
-                        await user.ws.send_json(
-                                MessageRejected(
-                                    reason="ERROR: Invalid Message Type",
-                                ).dict())
+                        # silently discard.
+                        logger.debug("EndSessionRequest was received, "
+                                     "but the session doesn't exist "
+                                     f"{m.session_id}")
+                        pass
                 else:
                     await user.ws.send_json(
                             MessageRejected(
@@ -315,7 +323,8 @@ def api(config):
                 session_id = get_id()
                 users_session[session_id] = Session.model_validate({
                     "users": [user, peer],
-                    "history": History.model_validate({})
+                    "history": History.model_validate({}),
+                    "session_id": session_id,
                     })
                 del users_waiting[user.user_id]
                 del users_waiting[peer.user_id]
@@ -342,6 +351,7 @@ def api(config):
                     users_session[session_id] = Session.model_validate({
                         "users": [user, assistant],
                         "history": history,
+                        "session_id": session_id,
                         })
                     del users_waiting[user.user_id]
                     # vs ai

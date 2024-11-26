@@ -12,7 +12,9 @@ class UserDef(BaseModel):
     user_id: str = Field(description="User ID")
     role: Literal["保健師","患者"] = Field(description="Assistant Role")
     status: str  = Field(description="User Status")
-    ws: Any      = Field(None, description="Placeholder of WebSocket session")
+    ws: Any      = Field(None, description="Placeholder of WebSocket")
+    # session をここでも管理すると便利かも
+    #session: Any = Field(None, description="Placeholder of the session")
 
 if __name__ == "__main__":
     AssistantDef(user_id="aaa", role="患者", assistant_id="bbb")
