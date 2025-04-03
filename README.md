@@ -3,6 +3,8 @@ OpenAI対応RISTEXチャットサーバ
 
 ristex-chatserver
 
+![アーキテクチャ概略図](doc/arch01.png)
+
 ##
 
 ```
