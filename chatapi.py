@@ -37,7 +37,6 @@ def api(config):
     config.assistant_list = json.load(open(config.assistants_storage,
                                            encoding="utf-8"))
 
-    # PatientRoleProviderの初期化
     role_provider = PatientRoleProvider(config)
 
     app = FastAPI()
@@ -286,7 +285,7 @@ def api(config):
                 user_id=user_id,
                 role=req.user_role,
                 status=Status.Registered.name,
-                target_patient_id=req.target_patient_id, # 追加
+                target_patient_id=req.target_patient_id,
                 )
         #
         return RegistrationAccepted(
