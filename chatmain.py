@@ -13,9 +13,17 @@ def log_start(config):
                                config.server_port))
 
 if __name__ == "__main__":
+    import os
     from uvicorn import Config, Server
     loop = asyncio.new_event_loop()
     config = set_config("chatserver", loop, sys.argv[1:])
+    
+    # For Render deployment
+    config.server_address = "0.0.0.0"
+    port = os.environ.get("PORT")
+    if port:
+        config.server_port = int(port)
+
     log_start(config)
     server = Server(Config(app=api(config),
                            host=config.server_address,

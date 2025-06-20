@@ -1,0 +1,15 @@
+{
+  "server_cert": "",
+  "server_address": "0.0.0.0",
+  "server_port": 80,
+  "www_path": "./www",
+  "max_queue_size": 100,
+  "apikey_storage": "apikey.txt",
+  "log_file": "chatserver.log",
+  "log_stdout": true,
+  "enable_debug": true,
+  "tz": "Asia/Tokyo",
+  "assistants_storage": "assistants.json",
+  "gdrive_file_id": "1eCPos_UVZC_OX1P_U7TQG3-18X1Z0mFC",
+  "gdrive_service_account": "gen-lang-client-0095297815-f65236acfe70.json"
+}
