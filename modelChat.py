@@ -91,6 +91,8 @@ class Status(Enum):
 class RegistrationRequest(BaseModel):
     msg_type: str=MsgType.RegistrationRequest.name
     user_role: Literal["保健師", "患者"]
+    target_patient_id: Optional[str] = Field(None,
+            description="保健師が対話したい患者のID")
 
 # S > U
 class RegistrationAccepted(BaseModel):
@@ -156,4 +158,3 @@ if __name__ == "__main__":
         "msg_type": "Registration Request",
         "user_role": "保健師"
         })
-

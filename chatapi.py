@@ -9,6 +9,7 @@ from typing import List
 from modelChat import *
 from modelUserDef import *
 from modelHistory import *
+from modelRole import PatientRoleProvider
 import aiofiles
 import json
 import dateutil.parser
@@ -36,7 +37,21 @@ def api(config):
     config.assistant_list = json.load(open(config.assistants_storage,
                                            encoding="utf-8"))
 
+    role_provider = PatientRoleProvider(config)
+
     app = FastAPI()
+
+    @app.on_event("startup")
+    async def startup_event():
+        """サーバー起動時にPatientRoleProviderを初期化する"""
+        logger.info("Initializing PatientRoleProvider...")
+        try:
+            await role_provider.initialize()
+            logger.info("PatientRoleProvider initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize PatientRoleProvider: {e}")
+            # ここでサーバーを停止させるか、エラー状態にするかは要件次第
+            # exit(1)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(
@@ -205,8 +220,7 @@ def api(config):
                                 continue
                             if u.model_dump().get("thread_id") is not None:
                                 # send message to AI
-                                response_msg = await oaw.send_message(
-                                        u, m.user_msg)
+                                response_msg = await oaw.send_message(u, m.user_msg)
                                 # add response to history
                                 session.history.history.append(
                                         MessageInfo.model_validate({
@@ -271,6 +285,7 @@ def api(config):
                 user_id=user_id,
                 role=req.user_role,
                 status=Status.Registered.name,
+                target_patient_id=req.target_patient_id,
                 )
         #
         return RegistrationAccepted(
@@ -284,6 +299,17 @@ def api(config):
     """
     Initial -> Registered
     """
+    @app.get("/v1/patients")
+    async def get_available_patients():
+        """利用可能な患者IDのリストを返すエンドポイント"""
+        if role_provider.df is None:
+            # まだ初期化が完了していない、または失敗した場合
+            logger.warning("Patient data is not available yet.")
+            raise HTTPException(status_code=503, detail="Patient data is not ready. Please try again later.")
+        
+        ids = role_provider.get_available_patient_ids()
+        return {"patient_ids": ids}
+
     @app.post("/v1")
     async def post_request(req: RegistrationRequest):
         logger.debug(f"APP POST REQ: {req}")
@@ -357,6 +383,38 @@ def api(config):
                     # vs ai
                     user.status = Status.Established.name
                     assistant.thread_id = await oaw.create_thread()
+                    logger.debug(f"Created new thread with ID: {assistant.thread_id}")
+
+                    # ペルソナを最初のメッセージとして注入
+                    if role_provider.df is not None:
+                        # 保健師が指定した患者ID、またはデフォルトID "1" を使用
+                        patient_id_for_ai = user.target_patient_id or "1"
+                        prompt_chunks = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                        
+                        for chunk in prompt_chunks:
+                            # OpenAIのスレッドに注入
+                            await oaw.add_message_to_thread(assistant.thread_id, chunk)
+                            # ローカルのhistoryにも記録
+                            history.history.append(
+                                MessageInfo(role="system", text=chunk)
+                            )
+                        logger.debug(f"Persona chunks injected for patient ID {patient_id_for_ai}")
+
+                        # アシスタントの初期発言を追加
+                        initial_bot_message = "何でも聞いてください"
+                        history.history.append(
+                            MessageInfo(role="患者", text=initial_bot_message)
+                        )
+                        # 人間のクライアントに初期発言を送信
+                        await user.ws.send_json(
+                            MessageForwarded(
+                                session_id=session_id,
+                                user_msg=initial_bot_message
+                            ).dict()
+                        )
+                    else:
+                        logger.warning("PatientRoleProvider is not initialized. Skipping persona injection.")
+
                     await user.ws.send_json(
                         Established(session_id=session_id).dict()
                         )
@@ -377,4 +435,3 @@ def api(config):
 
     #
     return app
-

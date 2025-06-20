@@ -2,8 +2,8 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional, List, Union, Any
 
 class MessageInfo(BaseModel):
-    role: Literal["保健師","患者"] = Field(
-            description="Role name of the entiry submitted the request.")
+    role: Literal["保健師","患者", "system"] = Field(
+            description="Role name of the entiry submitted the request. 'system' is for internal use.")
     text: str = Field(
             description="text message in the request or response.")
 
@@ -75,4 +75,3 @@ if __name__ == "__main__":
     print(m)
     x.history.append(m)
     print(x)
-

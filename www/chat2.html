@@ -195,16 +195,25 @@ body {
                             text="保健師か患者を選択してください。"
                         >
                             <template v-slot:actions>
-                                <v-spacer></v-spacer>
-                                <v-radio-group v-model="roleNameDraft">
-                                    <v-radio label="保健師" value="保健師"></v-radio>
-                                    <v-radio label="患者" value="患者"></v-radio>
-                                </v-radio-group>
-                                <v-btn
-                                    class="pa-2 elevation-2"
-                                    @click="submitRegistrationDialog">
-                                    登録
-                                </v-btn>
+                                <div class="w-100 d-flex flex-col justify-space-evenly">
+                                    <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
+                                        <v-radio label="保健師" value="保健師"></v-radio>
+                                        <v-radio label="患者" value="患者"></v-radio>
+                                    </v-radio-group>
+                                    <div
+                                    v-if="roleNameDraft == '保健師'"
+                                    class="flex-grow-5 h-auto d-flex align-center"
+                                    style="width: 120px">
+                                        <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
+                                    </div>
+                                    <div class="h-auto d-flex align-center">
+                                        <v-btn
+                                        class="pa-2 elevation-2"
+                                        @click="submitRegistrationDialog">
+                                            登録
+                                        </v-btn>
+                                    </div>
+                                </div>
                             </template>
                         </v-card>
                     </v-dialog>
@@ -329,12 +338,15 @@ const app = createApp({
             chatInputSizeCheck: [v => v.length <= this.chatInputMaxSize || `最大${this.chatInputMaxSize}文字`],
             // end of session
             confirmEndSessionDialog: false,
+            patientIds: [],
+            patientId: null,
         };
     },
     mounted() {
         ret = RegExp('^(http?)://([^/]+)/').exec(document.baseURI);
         this.protocol = ret[1];
         this.host = ret[2];
+        this.fetchPatientIds();
     },
     computed: {
         chatHistoryLeftStyle: function() {
@@ -362,6 +374,7 @@ const app = createApp({
         },
         submitRegistrationDialog(value) {
             if (this.roleNameDraft !== null) {
+                if (this.roleNameDraft == '保健師' && this.patientId == null) return;
                 this.roleNameText = this.roleNameDraft;
                 if (this.roleNameText == '保健師') {
                     this.roleColor = 'bg-blue';
@@ -386,12 +399,16 @@ const app = createApp({
             }
         },
         startWebSocket() {
+            let body = {
+                msg_type: 'RegistrationRequest',
+                user_role: this.roleNameDraft,
+            };
+            if (this.roleNameDraft == '保健師') {
+                body.target_patient_id = String(this.patientId);
+            }
             let opt = {
                 method: 'POST',
-                body: JSON.stringify({
-                    msg_type: 'RegistrationRequest',
-                    user_role: this.roleNameDraft,
-                }),
+                body: JSON.stringify(body),
             };
             let url = `${this.protocol}://${this.host}/v1`;
             get_data(url, opt).then(res => {
@@ -531,6 +548,17 @@ console.log("WS", ret);
             const container = document.getElementById("divChatHistory");
             container.scrollTop = container.scrollHeight;
         },
+        fetchPatientIds() {
+            let url = `${this.protocol}://${this.host}/v1/patients`;
+            get_data(url, { method: 'GET' }).then(res => {
+                if (res.patient_ids) {
+                    this.patientIds = res.patient_ids.map(n => Math.floor(n));
+                }
+            }).catch(err => {
+                console.error("Failed to fetch patient IDs:", err);
+                this.MessageToUser = "患者IDリストの取得に失敗しました。";
+            });
+        },
         changeFontSize(value) {
             if (value == 0) {
                 this.chatHistoryFontSize = 'text-h6';
@@ -550,4 +578,3 @@ app.use(vuetify).mount('#app');
     </body>
 
 </html>
-
