@@ -372,6 +372,12 @@ const app = createApp({
             this.chatHistoryLastNum = 0;
             this.registrationDialog = true;
         },
+        sessionClosed() {
+            this.MessageToUser = '接続が切れました。ロールの選択からはじめてください。';
+            this.ws = null;
+            this.chatInputLock = false;
+            this.sessionInitialized();
+        },
         submitRegistrationDialog(value) {
             if (this.roleNameDraft !== null) {
                 if (this.roleNameDraft == '保健師' && this.patientId == null) return;
@@ -449,10 +455,11 @@ console.log("WS", ret);
                     } else if (ret.msg_type == 'SessionTerminated') {
                         // サーバ側でWSをクローズするためにACKが必要。
                         it.submitEndSessionRequest();
-                        it.MessageToUser = '接続が切れました。ロールの選択からはじめてください。';
-                        it.ws = null;
-                        it.sessionInitialized();
+                        it.sessionClosed();
                     }
+                }
+                this.ws.onclose = function (event) {
+                    it.sessionClosed();
                 }
             });
         },
