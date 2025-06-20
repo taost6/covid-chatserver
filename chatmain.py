@@ -23,6 +23,8 @@ if __name__ == "__main__":
     port = os.environ.get("PORT")
     if port:
         config.server_port = int(port)
+    # Render's proxy handles SSL, so disable it in the app
+    config.server_cert = None
 
     log_start(config)
     server = Server(Config(app=api(config),
