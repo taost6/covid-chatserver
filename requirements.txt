@@ -3,3 +3,4 @@ uvicorn
 openai
 aiofiles
 python-dateutil
+pandas
