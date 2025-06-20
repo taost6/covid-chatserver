@@ -343,10 +343,15 @@ const app = createApp({
         };
     },
     mounted() {
-        ret = RegExp('^(http?)://([^/]+)/').exec(document.baseURI);
-        this.protocol = ret[1];
-        this.host = ret[2];
-        this.fetchPatientIds();
+        const ret = /^(https?):\/\/([^/]+)/.exec(document.baseURI);
+        if (ret) {
+            this.protocol = ret[1];
+            this.host = ret[2];
+            this.fetchPatientIds();
+        } else {
+            console.error("Could not parse protocol and host from baseURI:", document.baseURI);
+            this.MessageToUser = "アプリケーションのURLの解析に失敗しました。";
+        }
     },
     computed: {
         chatHistoryLeftStyle: function() {
