@@ -432,7 +432,8 @@ console.log("HTTP", res);
                     this.MessageToUser = 'ERROR';
                 }
                 //
-                let url = `ws://${this.host}/v1/ws/${this.userId}`;
+                const wsProtocol = this.protocol === 'https' ? 'wss' : 'ws';
+                let url = `${wsProtocol}://${this.host}/v1/ws/${this.userId}`;
                 this.ws = new WebSocket(url);
                 let it = this
                 this.ws.onmessage = function (event) {
