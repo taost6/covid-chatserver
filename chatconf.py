@@ -19,6 +19,8 @@ class ChatConfigModel(BaseModel):
     tz: str = "Asia/Tokyo"
     max_queue_size: int = 100
     assistants_storage: str
+    gdrive_file_id: str
+    gdrive_service_account: str
 
 def __from_args(args):
     ap = ArgumentParser(
