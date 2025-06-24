@@ -150,6 +150,54 @@ class PatientRoleProvider:
 
         return chunks
 
+    def get_patient_details(self, patient_id: str) -> dict:
+        """
+        指定された患者IDの詳細情報を辞書として返す。UI表示用。
+        """
+        if self.df is None:
+            raise RuntimeError("Provider is not initialized.")
+
+        column_indices = self._get_column_indices()
+        if column_indices.get("ID", -1) == -1:
+            return {"error": "ID column not found."}
+
+        try:
+            row_list = self.df.values.tolist()
+            row = next(filter(lambda r: str(int(r[column_indices["ID"]])) == str(patient_id), row_list))
+        except (StopIteration, ValueError):
+            return {"error": f"Patient ID {patient_id} not found."}
+        except Exception as e:
+            return {"error": f"An unexpected error occurred: {e}"}
+
+        details = {}
+        # mock.jsxの項目に合わせてデータを抽出・整形
+        def get_value(col_name, default='N/A'):
+            idx = column_indices.get(col_name, -1)
+            if idx != -1 and pd.notna(row[idx]):
+                return row[idx]
+            return default
+
+        details['id'] = get_value('ID', 'N/A')
+        details['name'] = get_value('氏名')
+        age_val = get_value('年齢', None)
+        details['age'] = int(age_val) if age_val is not None else 'N/A'
+        details['gender'] = get_value('性別')
+        details['residence'] = get_value('変換後都道府県')
+        birthDate = get_value('生年月日', None)
+        details['birthDate'] = pd.to_datetime(birthDate).strftime('%Y年%m月%d日') if birthDate else '不明'
+        
+        onsetDate = get_value('発症日', None)
+        details['onsetDate'] = pd.to_datetime(onsetDate).strftime('%Y年%m月%d日') if onsetDate else '不明'
+        infectionDate = get_value('感染日', None)
+        details['infectionDate'] = pd.to_datetime(infectionDate).strftime('%Y年%m月%d日') if infectionDate else '不明'
+        
+        details['symptoms'] = get_value('プロフィール', '情報なし')
+        
+        details['profile'] = get_value('プロフィール', '情報なし')
+        details['notes'] = get_value('備考欄', '特になし')
+
+        return details
+
     def get_available_patient_ids(self) -> list[str]:
         if self.df is None:
             raise RuntimeError("Provider is not initialized. Call `await provider.initialize()` first.")
@@ -163,7 +211,8 @@ class PatientRoleProvider:
 
         try:
             completed_df = self.df[self.df[status_col] == '完了']
-            available_ids = completed_df[id_col].dropna().astype(str).unique().tolist()
+            # 整数に変換してから文字列に変換することで、小数点以下を削除
+            available_ids = completed_df[id_col].dropna().astype(float).astype(int).astype(str).unique().tolist()
             return available_ids
         except Exception as e:
             print(f"IDリストのフィルタリング中にエラーが発生しました: {e}")

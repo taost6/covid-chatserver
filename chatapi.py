@@ -310,6 +310,20 @@ def api(config):
         ids = role_provider.get_available_patient_ids()
         return {"patient_ids": ids}
 
+    @app.get("/v1/patient/{patient_id}")
+    async def get_patient_details(patient_id: str):
+        """指定された患者IDの詳細情報を返すエンドポイント"""
+        if role_provider.df is None:
+            logger.warning("Patient data is not available yet.")
+            raise HTTPException(status_code=503, detail="Patient data is not ready. Please try again later.")
+        
+        details = role_provider.get_patient_details(patient_id)
+        if "error" in details:
+            logger.error(f"Error getting patient details for ID {patient_id}: {details['error']}")
+            raise HTTPException(status_code=404, detail=details['error'])
+        
+        return details
+
     @app.post("/v1")
     async def post_request(req: RegistrationRequest):
         logger.debug(f"APP POST REQ: {req}")

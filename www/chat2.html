@@ -1,346 +1,310 @@
 <!DOCTYPE html>
 <html lang="ja">
 
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <link rel="icon" href="data:,"> <!-- NOTE: Remove it for valid icon. -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19患者積極的疫学調査シミュレータ</title>
+    <link rel="icon" href="data:,">
+    <!--
+    <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
+    <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vuetify@2"></script>
+    -->
+    <script src="lib/vue/vue.global.js"></script>
+    <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
+    <script src="lib/vuetify/vuetify.min.js"></script>
 
-        <title>template</title>
+    <!-- Material Design Icons -->
+    <!--
+    <link href="http://cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css" rel="stylesheet">
+    -->
+    <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
 
-        <!--
-        <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
-        <link href="https://cdn.jsdelivr.net/npm/vuetify@2.x/dist/vuetify.min.css" rel="stylesheet">
-        <script src="https://cdn.jsdelivr.net/npm/vuetify@2"></script>
-        -->
-        <script src="lib/vue/vue.global.js"></script>
-        <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
-        <script src="lib/vuetify/vuetify.min.js"></script>
+    <!--
+    <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+    -->
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            display: none;
+        }
+        html, body {
+            overflow-y: scroll;
+        }
+        .v-application {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .v-main {
+            flex: 1 1 auto;
+            overflow: scroll;
+            display: flex;
+            flex-direction: column;
+        }
+        .v-container {
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .v-row {
+            flex: 1 1 auto;
+        }
+        .v-row.fill-height {
+            height: 100%;
+        }
+        .chat-col {
+            height: 100%;
+            max-height: calc(100%);
+        }
+        #chat-card {
+            display: flex;
+            flex-direction: column;
+            flex: 1 1 auto;
+        }
+        #chat-history-container {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .message-bubble-user {
+            background-color: #2563eb !important;
+            color: white;
+        }
+        .message-bubble-patient {
+            background-color: #f3f4f6 !important;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+        }
+        #submitEndOfSession.v-list-item--variant-outlined {
+            border: 2px solid #ff0000 !important;
+        }
+    </style>
+</head>
 
-        <!-- Material Design Icons -->
-        <!--
-        <link href="http://cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css" rel="stylesheet">
-        -->
-        <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
-
-        <!--
-        <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
-        -->
-
-    </head>
-
-    <body>
-
-<style>
-body {
-    height: 100vh;
-}
-#main {
-    height: 100vh;
-}
-.w-0 {
-    display: flex;
-    justify-content: stretch;
-}
-.w-c {
-    display: flex;
-    justify-content: center;
-}
-.w-l {
-    display: flex;
-    justify-content: left;
-}
-.w-r {
-    display: flex;
-    justify-content: right;
-}
-#submitEndOfSession.v-list-item--variant-outlined {
-    border: 2px solid #ff0000 !important;
-}
-</style>
-
+<body>
 <div id="app">
-
     <v-app>
-        <v-main fluid id="main">
-
-            <v-toolbar color="green-lighten-1" title="感染者疫学調査" density="compact">
-                <v-spacer></v-spacer>
-                <v-btn
-                    icon="mdi-menu"
-                    @click.stop="drawer = !drawer"
-                    ></v-btn>
-            </v-toolbar>
-
-            <v-sheet class="mt-1 pa-2" color="grey-lighten-4">
-                {{MessageToUser}}
-            </v-sheet>
-
-            <!--メイン-->
-            <v-row dense>
-                <v-col md="2" sm="2" xs="4">
-                    <v-sheet class="mt-1 ml-1">
-                        <div :class="`mt-1 mx-1 pa-2 text-h6 text-center border ${roleColor}`">
-                            {{roleNameText}}
+        <v-main>
+            <v-container fluid class="pa-md-4 pa-2 d-flex flex-column">
+                <!-- ヘッダー -->
+                <v-card class="mb-4 pb-2 flex-shrink-0" rounded="lg" elevation="2">
+                    <v-card-title class="d-flex align-center text-h6 text-md-h5 font-weight-bold text-blue-darken-4" style="word-break: keep-all; white-space: wrap;">
+                        <v-icon start color="blue-darken-2">mdi-file-document-outline</v-icon>
+                        <div>
+                            <div style="display: inline-block;">COVID-19患者積極的</div>
+                            <div style="display: inline-block;">疫学調査シミュレータ</div>
                         </div>
-                        <!--入力操作-->
-                        <div class="mt-2 mx-1">
-                            <v-btn
-                                @click="submitChatInputText"
-                                density="default"
-                                block
-                                color="grey-lighten-4"
-                                size="x-large"
-                                text="送信"
-                                >
-                            </v-btn>
-                        </div>
-                    </v-sheet>
-                </v-col>
+                        <v-spacer></v-spacer>
+                        <v-btn icon="mdi-menu" @click.stop="drawer = !drawer"></v-btn>
+                    </v-card-title>
+                    <v-card-subtitle>
+                        <v-chip v-if="MessageToUser" small :color="statusColor">{{ MessageToUser }}</v-chip>
+                    </v-card-subtitle>
+                </v-card>
 
-                <v-col md="10" sm="10" xs="8">
-                    <!--入力-->
-                    <div class="mt-1 mr-1 border">
-                        <v-textarea
-                            style="font-size: large"
-                            rows="4"
-                            v-model="chatInputText"
-                            outlined
-                            clearable
-                            clear-icon="mdi-close-circle"
-                            no-resize
-                            density="compact"
-                            hide-details="true"
-                            :counter="chatInputMaxSize"
-                            :rules="chatInputSizeCheck"
-                            :label="chatInputMaxSizeText"
-                            :disabled="chatInputDisabled"
-                            @input="chatInputSubmitWithEnter"
-                        ></v-textarea>
-                    </div>
-                </v-col>
-            </v-row>
+                <!-- 患者情報パネル -->
+                <div class="d-flex flex-column" style="height: auto;">
+                    <v-expansion-panels v-if="patientInfo.id && roleNameDraft === '保健師'" style="flex: 1 1 auto; overflow-y: visible;">
+                        <v-expansion-panel elevation="2" rounded="lg">
+                            <v-expansion-panel-title color="blue-lighten-5">
+                                <v-icon start>mdi-account-box-outline</v-icon>
+                                患者情報・シチュエーション
+                            </v-expansion-panel-title>
+                            <v-expansion-panel-text>
+                                <v-list density="compact">
+                                    <v-list-item class="bg-green-lighten-5 rounded-lg mb-3 pa-3">
+                                        <div class="font-weight-bold text-green-darken-4 mb-2">基本情報</div>
+                                        <div><span class="text-grey-darken-1">氏名:</span> {{ patientInfo.name }}</div>
+                                        <div><span class="text-grey-darken-1">年齢・性別:</span> {{ patientInfo.age }}歳 {{ patientInfo.gender }}</div>
+                                        <div><span class="text-grey-darken-1">生年月日:</span> {{ patientInfo.birthDate }}</div>
+                                        <div><span class="text-grey-darken-1">居住地:</span> {{ patientInfo.residence }}</div>
+                                    </v-list-item>
+                                    <v-list-item class="bg-purple-lighten-5 rounded-lg mb-3 pa-3">
+                                        <div class="font-weight-bold text-purple-darken-4 mb-2">感染・発症</div>
+                                        <div><span class="text-grey-darken-1">感染日:</span> {{ patientInfo.infectionDate }}</div>
+                                        <div><span class="text-grey-darken-1">発症日:</span> {{ patientInfo.onsetDate }}</div>
+                                    </v-list-item>
+                                    <v-list-item class="bg-amber-lighten-5 rounded-lg pa-3">
+                                        <div class="font-weight-bold text-amber-darken-4 mb-2">患者の特徴</div>
+                                        <div class="text-caption text-grey-darken-3">{{ patientInfo.profile }}</div>
+                                    </v-list-item>
+                                </v-list>
+                            </v-expansion-panel-text>
+                        </v-expansion-panel>
+                    </v-expansion-panels>
+                </div>
 
-            <!--履歴-->
-            <v-sheet style="height: 75vh">
-                <!--会話履歴-->
-                <v-sheet class="mt-1 mx-1 pa-2 text-h5 border" color="grey-lighten-4">
-                    会話履歴
-                </v-sheet>
-                <!--会話履歴メイン-->
-                <v-sheet
-                    id="divChatHistory"
-                    style="height: 69vh; overflow-x: hidden; overflow-y: auto;"
-                    class="my-1 mx-1 pa-2 border"
-                >
-                    <div v-for="item in chatHistory" :key="item.num">
-                        <div v-if="item.num%2 == 1" :class="chatHistoryLeftStyle">
-                            <v-icon icon="mdi-account-tie-woman" size="large" :color="yourIconColor"></v-icon>
-                            <span>{{item.message}}</span>
-                        </div>
-                        <div v-if="item.num%2 == 0" :class="chatHistoryRightStyle">
-                            <span>{{item.message}}</span>
-                            <v-icon icon="mdi-account" size="large" :color="peerIconColor"></v-icon>
-                        </div>
-                    </div>
-                </v-sheet>
-            </v-sheet>
+                <!-- チャット画面 -->
+                <div class="d-flex flex-column mt-4 chat-col" style="height: 100%;">
+                    <v-card id="chat-card" rounded="lg" elevation="2" style="flex: 1 1 auto; height: 100%;">
+                        <v-toolbar density="compact" color="grey-lighten-3">
+                            <v-toolbar-title class="text-subtitle-1 font-weight-bold">
+                                <v-icon start :color="userStatus === 'Established' ? 'green' : 'orange'">
+                                    {{ userStatus === 'Established' ? 'mdi-circle' : 'mdi-circle-outline' }}
+                                </v-icon>
+                                {{ (patientInfo.name && roleNameDraft === '保健師') ? patientInfo.name : '患者' }}さん
+                                <span v-if="patientInfo.id && roleNameDraft === '保健師'">
+                                    （患者ID: <span class="font-weight-bold text-blue-darken-3">{{ patientInfo.id }}</span>）
+                                </span>
+                            </v-toolbar-title>
+                        </v-toolbar>
 
+                        <v-card-text id="chat-history-container">
+                            <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-2" :class="item.sender === 'interviewer' ? 'justify-end' : 'justify-start'">
+                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'interviewer' ? 'message-bubble-user' : 'message-bubble-patient'">
+                                    <div class="d-flex align-start">
+                                        <v-icon class="mr-2 mt-1">{{ item.sender === 'interviewer' ? 'mdi-account-tie-woman' : 'mdi-account' }}</v-icon>
+                                        <div class="text-body-1" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
+                                    </div>
+                                </v-sheet>
+                            </div>
+                        </v-card-text>
+                    </v-card>
+                </div>
+            </v-container>
         </v-main>
 
-        <!-- ドロワー -->
-        <v-navigation-drawer
-            v-model="drawer"
-            location="right"
-            persistent
-            temporary
-            width="360"
-        >
+        <v-footer app class="pa-2 bg-grey-lighten-3">
+            <v-textarea
+                v-model="chatInputText"
+                placeholder="150文字以内で入力してください"
+                rows="1"
+                auto-grow
+                no-resize
+                outlined
+                dense
+                hide-details
+                class="mr-2"
+                :disabled="chatInputDisabled"
+                @keydown.enter="handleEnterKey"
+            ></v-textarea>
+            <v-btn icon="mdi-send" color="blue" @click="submitChatInputText" :disabled="!chatInputText.trim() || chatInputDisabled"></v-btn>
+        </v-footer>
+
+        <!-- ドロワー（設定メニュー） -->
+        <v-navigation-drawer v-model="drawer" location="right" temporary width="360">
             <v-toolbar title="操作メニュー">
                 <v-spacer></v-spacer>
-                <v-btn
-                    prepend-icon="mdi-window-close"
-                    @click.stop="drawer = !drawer"
-                    ></v-btn>
+                <v-btn icon="mdi-close" @click.stop="drawer = !drawer"></v-btn>
             </v-toolbar>
-
             <v-divider></v-divider>
-
-            <v-list density="compact" nav>
-
-                <v-list-item
-                    title="ロール"
-                    >
-                    <!-- ダイアログ -->
-                    <v-dialog
-                        v-model="registrationDialog"
-                        persistent
-                        with="auto"
-                        max-width="400px"
-                    >
+            <v-list nav dense>
+                <v-list-item title="ロール">
+                    <v-dialog v-model="registrationDialog" persistent max-width="400px">
                         <template v-slot:activator="{ props: activatorProps }">
-                            <v-btn
-                                density="default"
-                                block
-                                class="pa-2"
-                                :disabled="roleNameBtnDisabled"
-                                v-bind="activatorProps"
-                            >
-                                {{roleNameText}}
+                            <v-btn density="default" block class="pa-2" :disabled="roleNameBtnDisabled" v-bind="activatorProps">
+                                {{ roleNameText }}
                             </v-btn>
                         </template>
-                        <v-card
-                            prepend-icon="mdi mdi-account-alert"
-                            title="ロールの選択"
-                            text="保健師か患者を選択してください。"
-                        >
+                        <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="保健師か患者を選択してください。">
                             <template v-slot:actions>
                                 <div class="w-100 d-flex flex-col justify-space-evenly">
                                     <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
                                         <v-radio label="保健師" value="保健師"></v-radio>
                                         <v-radio label="患者" value="患者"></v-radio>
                                     </v-radio-group>
-                                    <div
-                                    v-if="roleNameDraft == '保健師'"
-                                    class="flex-grow-5 h-auto d-flex align-center"
-                                    style="width: 120px">
+                                    <div v-if="roleNameDraft == '保健師'" class="flex-grow-5 h-auto d-flex align-center" style="width: 120px">
                                         <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
                                     </div>
                                     <div class="h-auto d-flex align-center">
-                                        <v-btn
-                                        class="pa-2 elevation-2"
-                                        @click="submitRegistrationDialog">
-                                            登録
-                                        </v-btn>
+                                        <v-btn class="pa-2 elevation-2" @click="submitRegistrationDialog">登録</v-btn>
                                     </div>
                                 </div>
                             </template>
                         </v-card>
                     </v-dialog>
                 </v-list-item>
-
-                <!-- 会話の終了 -->
-                <v-list-item
-                    id="submitEndOfSession"
-                    class="mt-2 mr-2"
-                    prepend-icon="mdi-file-document-check-outline"
-                    variant="outlined"
-                >
-		    <v-btn @click="confirmEndSessionDialog = true">会話の終了</v-btn>
-		    <v-dialog v-model="confirmEndSessionDialog" max-width="400">
-			<v-card>
-			    <v-card-title>
-				会話を終了しますか？
-			    </v-card-title>
-			    <v-card-text>
-			    </v-card-text>
-			    <v-card-actions>
-			    <v-spacer></v-spacer>
-				<v-btn @click="cancelEndSessionRequest">続ける</v-btn>
-				<v-btn @click="submitEndSessionRequest">終了する</v-btn>
-			    </v-card-actions>
-			</v-card>
-                    </v-dialog>
+                <v-list-item id="submitEndOfSession" class="mt-2 mr-2" prepend-icon="mdi-file-document-check-outline" variant="outlined">
+                    <v-btn @click="confirmEndSessionDialog = true">会話の終了</v-btn>
                 </v-list-item>
-
                 <v-divider thickness="2" color="block" class="my-3"></v-divider>
-
-                <v-list-item
-                    title="文字の大きさ"
-                    >
-                    <v-slider
-                        v-model="chatHitsoryFontSizeNum"
-                        @end="changeFontSize"
-                        :ticks="{0:'小',1:'中',2:'大'}"
-                        min="0"
-                        max="2"
-                        step="1"
-                        show-ticks="always"
-                        tick-size="2"
-                        width="large"
-                    ></v-slider>
+                <v-list-item title="文字の大きさ">
+                    <v-slider v-model="chatHitsoryFontSizeNum" @end="changeFontSize" :ticks="{0:'小',1:'中',2:'大'}" min="0" max="2" step="1" show-ticks="always" tick-size="2"></v-slider>
                 </v-list-item>
-
                 <v-list-item>
-                    <v-checkbox
-                        label="　　改行で送信"
-                        v-model="confSubmitWithEnter"
-                        density="compact"
-                        hide-details="true"
-                    ></v-checkbox>
+                    <v-checkbox label="改行で送信" v-model="confSubmitWithEnter" density="compact" hide-details="true"></v-checkbox>
                 </v-list-item>
-
                 <v-list-item>
-                    <v-checkbox
-                        label="　　送信後クリア"
-                        v-model="confSubmitThenClear"
-                        density="compact"
-                        hide-details="true"
-                    ></v-checkbox>
+                    <v-checkbox label="送信後クリア" v-model="confSubmitThenClear" density="compact" hide-details="true"></v-checkbox>
                 </v-list-item>
-
-                <v-list-item
-                    title="会話の最後へ"
-                    prepend-icon="mdi-arrow-collapse-down"
-                    @click="closeAndChatHistoryToBottom"
-                    >
-                </v-list-item>
-
+                <v-list-item title="会話の最後へ" prepend-icon="mdi-arrow-collapse-down" @click="closeAndChatHistoryToBottom"></v-list-item>
             </v-list>
-
         </v-navigation-drawer>
-
+        
+        <!-- 会話終了確認ダイアログ -->
+        <v-dialog v-model="confirmEndSessionDialog" max-width="400">
+            <v-card title="会話を終了しますか？">
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn @click="cancelEndSessionRequest">続ける</v-btn>
+                    <v-btn color="error" @click="submitEndSessionRequest">終了する</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
     </v-app>
-
 </div>
 
 <script>
-async function get_data(url, opt) {
-    opt.headers = { 'Content-Type': 'application/json' };
+async function get_data(url, opt = {}) {
+    opt.headers = { 'Content-Type': 'application/json', ...opt.headers };
     const res = await fetch(url, opt);
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP error! status: ${res.status}, text: ${errorText}`);
+    }
     return await res.json();
 }
 
-const {createApp, h} = Vue;
-const {createVuetify} = Vuetify;
+const { createApp } = Vue;
+const { createVuetify } = Vuetify;
 const vuetify = createVuetify();
+
 const app = createApp({
     data() {
         return {
             // system
-            debugAlone: false,
             drawer: false,
             ws: null,
             protocol: null,
             host: null,
             MessageToUser: 'ロールを選択してください。',
-            // user conditions
+            // user
             userId: null,
             userStatus: null,
             sessionId: null,
-            // registraion
-            roleNameBtnDisabled: false,
+            // registration
             registrationDialog: true,
-            roleNameText: '━━━',
-            roleColor: '',
+            roleNameBtnDisabled: false,
+            roleNameText: 'ロール選択',
             roleNameDraft: null,
-            // chat history
-            chatHistory: [],
-            chatHistoryLastNum: 0,
-            chatHitsoryFontSizeNum: 1,
-            chatHistoryFontSize: 'text-h5',
-            // chat input
-            chatInputDisabled: true,
-            confSubmitWithEnter: false,
-            confSubmitThenClear: true,
-            chatInputText: '',
-            chatInputMaxSize: 150,
-            chatInputSizeCheck: [v => v.length <= this.chatInputMaxSize || `最大${this.chatInputMaxSize}文字`],
-            // end of session
-            confirmEndSessionDialog: false,
             patientIds: [],
             patientId: null,
+            // patient info
+            patientInfo: {},
+            // chat
+            chatHistory: [],
+            chatInputText: '',
+            chatInputDisabled: true,
+            chatInputLock: false,
+            chatHitsoryFontSizeNum: 1,
+            confSubmitWithEnter: false,
+            confSubmitThenClear: true,
+            // dialogs
+            confirmEndSessionDialog: false,
         };
+    },
+    computed: {
+        statusColor() {
+            if (this.userStatus === 'Established') return 'success';
+            if (this.MessageToUser.includes('失敗') || this.MessageToUser.includes('エラー')) return 'error';
+            return 'info';
+        }
     },
     mounted() {
         const ret = /^(https?):\/\/([^/]+)/.exec(document.baseURI);
@@ -349,228 +313,184 @@ const app = createApp({
             this.host = ret[2];
             this.fetchPatientIds();
         } else {
-            console.error("Could not parse protocol and host from baseURI:", document.baseURI);
+            console.error("URLの解析に失敗しました。");
             this.MessageToUser = "アプリケーションのURLの解析に失敗しました。";
         }
     },
-    computed: {
-        chatHistoryLeftStyle: function() {
-            return `w-l mt-1 mx-1 pa-2 align-center ${this.chatHistoryFontSize} elevation-2`;
-        },
-        chatHistoryRightStyle: function() {
-            return `w-r mt-1 mx-1 pa-2 align-center ${this.chatHistoryFontSize} elevation-2`;
-        },
-        chatInputMaxSizeText: function() {
-            return `質問を入力してください。(${this.chatInputMaxSize}文字以内)`;
-        },
+    watch: {
+        patientId(newId, oldId) {
+            if (newId && newId !== oldId && this.roleNameDraft === '保健師') {
+                this.fetchPatientDetails(newId);
+            }
+        }
     },
     methods: {
+        handleEnterKey(e) {
+            if (e.ctrlKey) {
+                this.submitChatInputText();
+            }
+        },
+        async fetchPatientIds() {
+            try {
+                const url = `${this.protocol}://${this.host}/v1/patients`;
+                const res = await get_data(url);
+                this.patientIds = res.patient_ids ? res.patient_ids.map(String) : [];
+            } catch (err) {
+                console.error("患者IDリストの取得に失敗:", err);
+                this.MessageToUser = "患者IDリストの取得に失敗しました。";
+            }
+        },
+        async fetchPatientDetails(patientId) {
+            try {
+                const url = `${this.protocol}://${this.host}/v1/patient/${patientId}`;
+                this.patientInfo = await get_data(url);
+            } catch (err) {
+                console.error("患者情報の取得に失敗:", err);
+                this.MessageToUser = `患者情報(ID: ${patientId})の取得に失敗しました。`;
+                this.patientInfo = {};
+            }
+        },
         sessionInitialized() {
-            // 初期化
             this.userId = null;
             this.userStatus = null;
             this.sessionId = null;
-            this.roleNameText = '━━━';
-            this.roleColor = '';
+            this.roleNameText = 'ロール選択';
             this.roleNameDraft = null;
             this.chatHistory = [];
-            this.chatHistoryLastNum = 0;
+            this.patientInfo = {};
+            this.patientId = null;
             this.registrationDialog = true;
+            this.roleNameBtnDisabled = false;
+            this.chatInputDisabled = true;
         },
         sessionClosed() {
-            this.MessageToUser = '接続が切れました。ロールの選択からはじめてください。';
+            this.MessageToUser = '接続が切れました。再度ロールを選択してください。';
+            if (this.ws) {
+                this.ws.onclose = null;
+                this.ws.close();
+            }
             this.ws = null;
-            this.chatInputLock = false;
             this.sessionInitialized();
         },
-        submitRegistrationDialog(value) {
-            if (this.roleNameDraft !== null) {
-                if (this.roleNameDraft == '保健師' && this.patientId == null) return;
-                this.roleNameText = this.roleNameDraft;
-                if (this.roleNameText == '保健師') {
-                    this.roleColor = 'bg-blue';
-                    this.yourIconColor = 'blue';
-                    this.peerIconColor = 'lime';
-                } else {
-                    this.roleColor = 'bg-lime';
-                    this.peerIconColor = 'lime';
-                    this.yourIconColor = 'lime';
-                    this.peerIconColor = 'blue';
-                }
-                this.roleNameBtnDisabled = true;
-                this.registrationDialog = false;
-                if (this.debugAlone) {
-                    //一人デバッグ
-                    this.chatInputDisabled = false;
-                    this.userStatus = 'Established';
-                    this.MessageToUser = '一人デバッグモードです。';
-                    return;
-                }
-                this.startWebSocket();
+        submitRegistrationDialog() {
+            if (!this.roleNameDraft) return;
+            if (this.roleNameDraft === '保健師' && !this.patientId) {
+                this.MessageToUser = "保健師の場合は患者IDを選択してください。";
+                return;
             }
+            
+            this.roleNameText = this.roleNameDraft;
+            this.roleNameBtnDisabled = true;
+            this.registrationDialog = false;
+            this.startWebSocket();
         },
         startWebSocket() {
-            let body = {
+            const body = {
                 msg_type: 'RegistrationRequest',
                 user_role: this.roleNameDraft,
+                target_patient_id: this.roleNameDraft === '保健師' ? String(this.patientId) : null,
             };
-            if (this.roleNameDraft == '保健師') {
-                body.target_patient_id = String(this.patientId);
-            }
-            let opt = {
-                method: 'POST',
-                body: JSON.stringify(body),
-            };
-            let url = `${this.protocol}://${this.host}/v1`;
-            get_data(url, opt).then(res => {
-                this.userId = res.user_id;
-                this.userStatus = res.user_status;
-console.log("HTTP", res);
-                if (res.msg_type == 'RegistrationAccepted') {
-                    this.MessageToUser = '登録が完了しました。相手を待っています。';
-                } else {
-                    this.MessageToUser = 'ERROR';
-                }
-                //
-                const wsProtocol = this.protocol === 'https' ? 'wss' : 'ws';
-                let url = `${wsProtocol}://${this.host}/v1/ws/${this.userId}`;
-                this.ws = new WebSocket(url);
-                let it = this
-                this.ws.onmessage = function (event) {
-                    ret = JSON.parse(event.data);
-console.log("WS", ret);
-                    if (ret.msg_type == 'Prepared') {
-                        it.MessageToUser = '相手を探しています。';
-                    } else if (ret.msg_type == 'Established') {
-                        it.sessionId = ret.session_id;
-                        it.userStatus = ret.user_status;
-                        it.MessageToUser = '相手の準備ができました。入力を開始できます。';
-                        it.chatInputDisabled = false;
-                    } else if (ret.msg_type == 'MessageForwarded') {
-                        it.MessageToUser = '相手が応答しました。';
-                        it.chatHistory.push({
-                            num: it.chatHistoryLastNum + 2,
+            const url = `${this.protocol}://${this.host}/v1`;
+            get_data(url, { method: 'POST', body: JSON.stringify(body) })
+                .then(res => {
+                    this.userId = res.user_id;
+                    this.userStatus = res.user_status;
+                    if (res.msg_type === 'RegistrationAccepted') {
+                        this.MessageToUser = '登録完了。相手を待っています...';
+                        this.connectWebSocket();
+                    } else {
+                        this.MessageToUser = '登録に失敗しました。';
+                    }
+                })
+                .catch(err => {
+                    console.error("登録エラー:", err);
+                    this.MessageToUser = "登録リクエストに失敗しました。";
+                    this.roleNameBtnDisabled = false;
+                });
+        },
+        connectWebSocket() {
+            const wsProtocol = this.protocol === 'https' ? 'wss' : 'ws';
+            const url = `${wsProtocol}://${this.host}/v1/ws/${this.userId}`;
+            this.ws = new WebSocket(url);
+
+            this.ws.onmessage = (event) => {
+                const ret = JSON.parse(event.data);
+                console.log("WS Received:", ret);
+                switch (ret.msg_type) {
+                    case 'Prepared':
+                        this.MessageToUser = '相手を探しています...';
+                        break;
+                    case 'Established':
+                        this.sessionId = ret.session_id;
+                        this.userStatus = 'Established';
+                        this.MessageToUser = '接続完了。チャットを開始できます。';
+                        this.chatInputDisabled = false;
+                        break;
+                    case 'MessageForwarded':
+                        this.chatHistory.push({
+                            sender: 'patient',
                             message: ret.user_msg,
                         });
-                        // 後処理
-                        it.chatInputLock = false;
-                        if (it.confSubmitThenClear === true) {
-                            it.chatInputText = '';
-                        }
-                        it.chatHistoryToBottom();
-                    } else if (ret.msg_type == 'SessionTerminated') {
-                        // サーバ側でWSをクローズするためにACKが必要。
-                        it.submitEndSessionRequest();
-                        it.sessionClosed();
-                    }
+                        this.chatInputLock = false;
+                        this.scrollToBottom();
+                        break;
+                    case 'SessionTerminated':
+                        this.MessageToUser = 'セッションが終了しました。';
+                        this.sessionClosed();
+                        break;
                 }
-                this.ws.onclose = function (event) {
-                    it.sessionClosed();
-                }
-            });
+            };
+            this.ws.onclose = () => this.sessionClosed();
+            this.ws.onerror = (err) => {
+                console.error("WebSocketエラー:", err);
+                this.MessageToUser = "WebSocket接続でエラーが発生しました。";
+                this.sessionClosed();
+            };
         },
-        chatInputSubmitWithEnter(value) {
-            if (this.confSubmitWithEnter === false) {
-                return;
-            }
-            if ((value.inputType == 'insertText' && value.data == null) ||
-                (value.inputType == 'insertLineBreak')) {
-                this.submitChatInputText();
-                return;
-            }
-        },
-        submitChatInputText(value) {
-            this.chatInputText = this.chatInputText.trim()
-            if (this.userStatus != 'Established') {
-                this.MessageToUser = `相手が見つかっていません。しばらくお待ちください。`;
-                return;
-            }
-            if (!this.chatInputText) {
-                this.MessageToUser = `何か入力してください。`;
-                return;
-            }
-            if (this.chatInputLock) {
-                this.MessageToUser = `相手の応答を待っています。しばらくお待ちください。`;
-                return;
-            }
-            // lock.
+        submitChatInputText() {
+            const text = this.chatInputText.trim();
+            if (!text || this.chatInputLock || this.userStatus !== 'Established') return;
+
             this.chatInputLock = true;
-            // input
-            if (this.chatHistory.length == 0) {
-                this.chatHistoryLastNum = 0
-            } else {
-                this.chatHistoryLastNum = this.chatHistory.slice(-1)[0].num;
-            }
             this.chatHistory.push({
-                num: this.chatHistoryLastNum + 1,
-                message: this.chatInputText,
+                sender: 'interviewer',
+                message: text,
             });
-            this.chatHistoryToBottom();
-            // response
-            if (this.debugAlone) {
-                this.getChatResponseDebug(this.chatInputText);
-            } else {
-                this.getChatResponse(this.chatInputText);
-            }
-        },
-        cancelEndSessionRequest(value) {
-            this.confirmEndSessionDialog = false;
-            this.drawer = false;
-        },
-        async submitEndSessionRequest(value) {
-            this.confirmEndSessionDialog = false;
-            this.drawer = false;
-            // サーバから削除する。
-            await this.ws.send(JSON.stringify({
-                msg_type: 'EndSessionRequest',
-                session_id: this.sessionId,
-                user_id: this.userId,
-            }));
-        },
-        async getChatResponse(input_text) {
-            await this.ws.send(JSON.stringify({
+            this.scrollToBottom();
+
+            this.ws.send(JSON.stringify({
                 msg_type: 'MessageSubmitted',
                 session_id: this.sessionId,
                 user_id: this.userId,
-                user_msg: input_text,
+                user_msg: text,
             }));
-        },
-        async getChatResponseDebug(input_text) {
-            //デバッグ用
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            response = `「${input_text}」と言いましたね。`;
-            this.chatHistory.push({
-                num: this.chatHistoryLastNum + 2,
-                message: response,
-            });
-            // 後処理
-            this.chatInputLock = false;
-            if (this.confSubmitThenClear === true) {
+            if (this.confSubmitThenClear) {
                 this.chatInputText = '';
             }
-            this.chatHistoryToBottom();
+        },
+        cancelEndSessionRequest() {
+            this.confirmEndSessionDialog = false;
+        },
+        submitEndSessionRequest() {
+            this.confirmEndSessionDialog = false;
+            if (this.ws && this.sessionId) {
+                this.ws.send(JSON.stringify({
+                    msg_type: 'EndSessionRequest',
+                    session_id: this.sessionId,
+                    user_id: this.userId,
+                }));
+            }
+        },
+        async scrollToBottom() {
+            await this.$nextTick();
+            const mainContent = document.querySelector('.v-main');
+            if (mainContent) {
+                mainContent.scrollTop = mainContent.scrollHeight;
+            }
         },
         closeAndChatHistoryToBottom() {
             this.drawer = false;
-            this.chatHistoryToBottom();
-        },
-        async chatHistoryToBottom() {
-            // 履歴をスクロールさせる。
-            // レンダリングされるまで少し待つ必要があるためsetTimeout()する。
-            await new Promise(resolve => setTimeout(resolve, 300));
-            const container = document.getElementById("divChatHistory");
-            container.scrollTop = container.scrollHeight;
-        },
-        fetchPatientIds() {
-            let url = `${this.protocol}://${this.host}/v1/patients`;
-            get_data(url, { method: 'GET' }).then(res => {
-                if (res.patient_ids) {
-                    this.patientIds = res.patient_ids.map(n => Math.floor(n));
-                }
-            }).catch(err => {
-                console.error("Failed to fetch patient IDs:", err);
-                this.MessageToUser = "患者IDリストの取得に失敗しました。";
-            });
+            this.scrollToBottom();
         },
         changeFontSize(value) {
             if (value == 0) {
@@ -585,9 +505,6 @@ console.log("WS", ret);
     },
 });
 app.use(vuetify).mount('#app');
-
 </script>
-
-    </body>
-
+</body>
 </html>
