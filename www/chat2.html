@@ -233,16 +233,19 @@
                         </template>
                         <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="保健師か患者を選択してください。">
                             <template v-slot:actions>
-                                <div class="w-100 d-flex flex-col justify-space-evenly">
-                                    <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
-                                        <v-radio label="保健師" value="保健師"></v-radio>
-                                        <v-radio label="患者" value="患者"></v-radio>
-                                    </v-radio-group>
-                                    <div v-if="roleNameDraft == '保健師'" class="flex-grow-5 h-auto d-flex align-center" style="width: 120px">
-                                        <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
-                                    </div>
-                                    <div class="h-auto d-flex align-center">
-                                        <v-btn class="pa-2 elevation-2" @click="submitRegistrationDialog">登録</v-btn>
+                                <div class="w-100 pa-4">
+                                    <v-text-field v-model="userName" label="お名前" required></v-text-field>
+                                    <div class="d-flex flex-col justify-space-evenly">
+                                        <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
+                                            <v-radio label="保健師" value="保健師"></v-radio>
+                                            <v-radio label="患者" value="患者"></v-radio>
+                                        </v-radio-group>
+                                        <div v-if="roleNameDraft == '保健師'" class="flex-grow-5 h-auto d-flex align-center" style="width: 120px">
+                                            <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
+                                        </div>
+                                        <div class="h-auto d-flex align-center">
+                                            <v-btn class="pa-2 elevation-2" @click="submitRegistrationDialog">登録</v-btn>
+                                        </div>
                                     </div>
                                 </div>
                             </template>
@@ -307,6 +310,7 @@ const app = createApp({
             MessageToUser: 'ロールを選択してください。',
             // user
             userId: null,
+            userName: '',
             userStatus: null,
             sessionId: null,
             // registration
@@ -407,7 +411,14 @@ const app = createApp({
             this.sessionInitialized();
         },
         submitRegistrationDialog() {
-            if (!this.roleNameDraft) return;
+            if (!this.userName.trim()) {
+                this.MessageToUser = "お名前を入力してください。";
+                return;
+            }
+            if (!this.roleNameDraft) {
+                this.MessageToUser = "ロールを選択してください。";
+                return;
+            }
             if (this.roleNameDraft === '保健師' && !this.patientId) {
                 this.MessageToUser = "保健師の場合は患者IDを選択してください。";
                 return;
@@ -421,6 +432,7 @@ const app = createApp({
         startWebSocket() {
             const body = {
                 msg_type: 'RegistrationRequest',
+                user_name: this.userName,
                 user_role: this.roleNameDraft,
                 target_patient_id: this.roleNameDraft === '保健師' ? String(this.patientId) : null,
             };
@@ -428,6 +440,7 @@ const app = createApp({
             get_data(url, { method: 'POST', body: JSON.stringify(body) })
                 .then(res => {
                     this.userId = res.user_id;
+                    this.sessionId = res.session_id;
                     this.userStatus = res.user_status;
                     if (res.msg_type === 'RegistrationAccepted') {
                         this.MessageToUser = '登録完了。相手を待っています...';
