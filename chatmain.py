@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 
 import sys
+from dotenv import load_dotenv
+load_dotenv()
+
 from chatconf import set_config
 import asyncio
 from chatapi import api
