@@ -84,6 +84,35 @@
         #submitEndOfSession.v-list-item--variant-outlined {
             border: 2px solid #ff0000 !important;
         }
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .v-footer, .v-navigation-drawer, .v-card-title .v-btn, .v-expansion-panel-title {
+                display: none !important;
+            }
+            .v-application, .v-main, .v-container, #chat-card, #chat-history-container {
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .v-card {
+                box-shadow: none !important;
+                border: 1px solid #ddd;
+            }
+            .v-toolbar {
+                display: none !important;
+            }
+            .message-bubble-user {
+                background-color: #e0e0e0 !important;
+                color: black !important;
+            }
+            .message-bubble-patient {
+                background-color: #fafafa !important;
+                color: black !important;
+                border: 1px solid #e0e0e0;
+            }
+        }
     </style>
 </head>
 
@@ -125,11 +154,11 @@
                                         <div><span class="text-grey-darken-1">生年月日:</span> {{ patientInfo.birthDate }}</div>
                                         <div><span class="text-grey-darken-1">居住地:</span> {{ patientInfo.residence }}</div>
                                     </v-list-item>
-                                    <v-list-item class="bg-purple-lighten-5 rounded-lg mb-3 pa-3">
+                                    <!-- <v-list-item class="bg-purple-lighten-5 rounded-lg mb-3 pa-3">
                                         <div class="font-weight-bold text-purple-darken-4 mb-2">感染・発症</div>
                                         <div><span class="text-grey-darken-1">感染日:</span> {{ patientInfo.infectionDate }}</div>
                                         <div><span class="text-grey-darken-1">発症日:</span> {{ patientInfo.onsetDate }}</div>
-                                    </v-list-item>
+                                    </v-list-item> -->
                                     <v-list-item class="bg-amber-lighten-5 rounded-lg pa-3">
                                         <div class="font-weight-bold text-amber-darken-4 mb-2">患者の特徴</div>
                                         <div class="text-caption text-grey-darken-3">{{ patientInfo.profile }}</div>
@@ -234,6 +263,8 @@
                     <v-checkbox label="送信後クリア" v-model="confSubmitThenClear" density="compact" hide-details="true"></v-checkbox>
                 </v-list-item>
                 <v-list-item title="会話の最後へ" prepend-icon="mdi-arrow-collapse-down" @click="closeAndChatHistoryToBottom"></v-list-item>
+                <v-divider class="my-2"></v-divider>
+                <v-list-item title="このページを印刷する" prepend-icon="mdi-printer" @click="printPage"></v-list-item>
             </v-list>
         </v-navigation-drawer>
         
@@ -326,7 +357,10 @@ const app = createApp({
     },
     methods: {
         handleEnterKey(e) {
-            if (e.ctrlKey) {
+            if (this.confSubmitWithEnter && !e.shiftKey) {
+                e.preventDefault();
+                this.submitChatInputText();
+            } else if (e.ctrlKey) {
                 this.submitChatInputText();
             }
         },
@@ -501,6 +535,14 @@ const app = createApp({
                 this.chatHistoryFontSize = 'text-h4';
             }
             this.chatHistoryToBottom();
+        },
+        printPage() {
+            this.drawer = false;
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    window.print();
+                }, 200);
+            });
         },
     },
 });
