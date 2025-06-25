@@ -357,7 +357,10 @@ const app = createApp({
     },
     methods: {
         handleEnterKey(e) {
-            if (e.ctrlKey) {
+            if (this.confSubmitWithEnter && !e.shiftKey) {
+                e.preventDefault();
+                this.submitChatInputText();
+            } else if (e.ctrlKey) {
                 this.submitChatInputText();
             }
         },
