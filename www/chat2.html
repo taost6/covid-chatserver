@@ -84,6 +84,35 @@
         #submitEndOfSession.v-list-item--variant-outlined {
             border: 2px solid #ff0000 !important;
         }
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .v-footer, .v-navigation-drawer, .v-card-title .v-btn, .v-expansion-panel-title {
+                display: none !important;
+            }
+            .v-application, .v-main, .v-container, #chat-card, #chat-history-container {
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .v-card {
+                box-shadow: none !important;
+                border: 1px solid #ddd;
+            }
+            .v-toolbar {
+                display: none !important;
+            }
+            .message-bubble-user {
+                background-color: #e0e0e0 !important;
+                color: black !important;
+            }
+            .message-bubble-patient {
+                background-color: #fafafa !important;
+                color: black !important;
+                border: 1px solid #e0e0e0;
+            }
+        }
     </style>
 </head>
 
@@ -234,6 +263,8 @@
                     <v-checkbox label="送信後クリア" v-model="confSubmitThenClear" density="compact" hide-details="true"></v-checkbox>
                 </v-list-item>
                 <v-list-item title="会話の最後へ" prepend-icon="mdi-arrow-collapse-down" @click="closeAndChatHistoryToBottom"></v-list-item>
+                <v-divider class="my-2"></v-divider>
+                <v-list-item title="このページを印刷する" prepend-icon="mdi-printer" @click="printPage"></v-list-item>
             </v-list>
         </v-navigation-drawer>
         
@@ -501,6 +532,14 @@ const app = createApp({
                 this.chatHistoryFontSize = 'text-h4';
             }
             this.chatHistoryToBottom();
+        },
+        printPage() {
+            this.drawer = false;
+            this.$nextTick(() => {
+                setTimeout(() => {
+                    window.print();
+                }, 200);
+            });
         },
     },
 });
