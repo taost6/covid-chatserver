@@ -10,6 +10,7 @@ class AssistantDef(BaseModel):
 
 class UserDef(BaseModel):
     user_id: str = Field(description="User ID")
+    user_name: str = Field(description="User Name")
     role: Literal["保健師","患者"] = Field(description="Assistant Role")
     status: str  = Field(description="User Status")
     ws: Any      = Field(None, description="Placeholder of WebSocket")
