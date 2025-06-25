@@ -123,6 +123,7 @@ class Established(BaseModel):
     msg_type: str=MsgType.Established.name
     user_status: str=Status.Established.name
     session_id: str
+    interview_date: Optional[str] = None
 
 # U > S
 class MessageSubmitted(BaseModel):

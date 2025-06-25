@@ -147,6 +147,10 @@
                             </v-expansion-panel-title>
                             <v-expansion-panel-text>
                                 <v-list density="compact">
+                                    <v-list-item v-if="interviewDate" class="bg-blue-lighten-5 rounded-lg mb-3 pa-3">
+                                        <div class="font-weight-bold text-blue-darken-4 mb-2">調査日（本日）</div>
+                                        <div>{{ interviewDate }}</div>
+                                    </v-list-item>
                                     <v-list-item class="bg-green-lighten-5 rounded-lg mb-3 pa-3">
                                         <div class="font-weight-bold text-green-darken-4 mb-2">基本情報</div>
                                         <div><span class="text-grey-darken-1">氏名:</span> {{ patientInfo.name }}</div>
@@ -322,6 +326,7 @@ const app = createApp({
             patientId: null,
             // patient info
             patientInfo: {},
+            interviewDate: null,
             // chat
             chatHistory: [],
             chatInputText: '',
@@ -469,6 +474,7 @@ const app = createApp({
                         break;
                     case 'Established':
                         this.sessionId = ret.session_id;
+                        this.interviewDate = ret.interview_date;
                         this.userStatus = 'Established';
                         this.MessageToUser = '接続完了。チャットを開始できます。';
                         this.chatInputDisabled = false;

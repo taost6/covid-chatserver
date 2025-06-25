@@ -6,7 +6,8 @@ from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
 import argparse
 import asyncio
 from chatconf import ChatConfigModel, set_config
@@ -100,7 +101,22 @@ class PatientRoleProvider:
     def _get_column_indices(self):
         return {col: self.df.columns.tolist().index(col) if col in self.df.columns else -1 for col in self.target_columns}
 
-    def get_patient_prompt_chunks(self, patient_id: str) -> List[str]:
+    def _determine_interview_date(self, onset_date_str: str) -> (datetime, str):
+        """発症日に基づいて調査日と時間帯を確率的に決定する"""
+        try:
+            onset_date = pd.to_datetime(onset_date_str)
+        except (ValueError, TypeError):
+            onset_date = datetime.now()
+
+        rand_val = random.random()
+        if rand_val < 0.5:
+            return onset_date, "（PM・夜間）"
+        elif rand_val < 0.9:
+            return onset_date + timedelta(days=1), ""
+        else:
+            return onset_date + timedelta(days=2), ""
+
+    def get_patient_prompt_chunks(self, patient_id: str) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
         """
@@ -115,14 +131,24 @@ class PatientRoleProvider:
             row_list = self.df.values.tolist()
             row = next(filter(lambda r: int(r[column_indices["ID"]]) == int(patient_id), row_list))
         except (StopIteration, ValueError):
-            return [f"患者ID {patient_id} のデータは見つかりませんでした。"]
+            return [f"患者ID {patient_id} のデータは見つかりませんでした。"], None
         except Exception as e:
-            return [f"検索中に予期せぬエラーが発生しました: {e}"]
+            return [f"検索中に予期せぬエラーが発生しました: {e}"], None
+
+        # 調査日を決定
+        onsetDate_idx = column_indices.get("発症日", -1)
+        onsetDate_str = row[onsetDate_idx] if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]) else None
+        interview_date, time_of_day = self._determine_interview_date(onsetDate_str)
+        
+        weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+        weekday_str = weekdays[interview_date.weekday()]
+        interview_date_str = interview_date.strftime("%Y年%m月%d日") + f"（{weekday_str}曜日）" + time_of_day
 
         chunks = []
-
+        
         # --- チャンク1: 基本情報と指示 ---
-        base_prompt = "以下に示す情報は全て、あなたに関する設定です。\n"
+        base_prompt = f"本日は{interview_date_str}です。\n"
+        base_prompt += "以下に示す情報は全て、あなたに関する設定です。\n"
         base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
         base_prompt += "具体的に質問されていることだけに答えてください。\n"
         base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n\n"
@@ -138,9 +164,13 @@ class PatientRoleProvider:
 
         chunks.append(base_prompt + base_info)
 
-        # --- チャンク2以降: 日ごとの行動履歴 ---
+        # --- チャンク2以降: 日ごとの行動履歴（調査日以前の情報のみ） ---
         for column_label, column_index in column_indices.items():
             if isinstance(column_label, datetime) and column_index != -1:
+                # 調査日より後の情報は含めない
+                if column_label.date() > interview_date.date():
+                    continue
+                
                 value = row[column_index]
                 if pd.notna(value):
                     date_str = column_label.strftime("%Y-%m-%d")
@@ -148,7 +178,7 @@ class PatientRoleProvider:
                     if value_str:
                         chunks.append(f"【{date_str}の行動履歴】\n{value_str}")
 
-        return chunks
+        return chunks, interview_date_str
 
     def get_patient_details(self, patient_id: str) -> dict:
         """
