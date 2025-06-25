@@ -7,3 +7,5 @@ pandas
 google-auth
 google-api-python-client
 openpyxl
+psycopg2-binary
+SQLAlchemy

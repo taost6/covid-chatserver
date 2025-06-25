@@ -1,15 +1,18 @@
-from fastapi import FastAPI, Body, Request, HTTPException
-from fastapi import WebSocket, WebSocketDisconnect, WebSocketDisconnect
+from fastapi import FastAPI, Body, Request, HTTPException, Depends
+from fastapi import WebSocket, WebSocketDisconnect
 from fastapi import status as httpcode
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import List
+from sqlalchemy.orm import Session
+import uuid
 from modelChat import *
 from modelUserDef import *
 from modelHistory import *
 from modelRole import PatientRoleProvider
+from modelDatabase import SessionLocal, ChatLog, init_db
 import aiofiles
 import json
 import dateutil.parser
@@ -43,15 +46,17 @@ def api(config):
 
     @app.on_event("startup")
     async def startup_event():
-        """サーバー起動時にPatientRoleProviderを初期化する"""
+        """サーバー起動時にDBとPatientRoleProviderを初期化する"""
+        logger.info("Initializing Database...")
+        init_db()
+        logger.info("Database initialized.")
+        
         logger.info("Initializing PatientRoleProvider...")
         try:
             await role_provider.initialize()
             logger.info("PatientRoleProvider initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize PatientRoleProvider: {e}")
-            # ここでサーバーを停止させるか、エラー状態にするかは要件次第
-            # exit(1)
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(
@@ -83,6 +88,31 @@ def api(config):
         """
         base = f"{datetime.now().timestamp()}-{random()}"
         return sha1(base.encode()).hexdigest()
+
+    def get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str):
+        try:
+            log_entry = ChatLog(
+                session_id=session_id,
+                user_name=user_name,
+                patient_id=patient_id,
+                user_role=user_role,
+                sender=sender,
+                message=message
+            )
+            db.add(log_entry)
+            db.commit()
+            db.refresh(log_entry)
+            logger.debug(f"Logged message for session {session_id}")
+        except Exception as e:
+            logger.error(f"Failed to log message: {e}")
+            db.rollback()
 
     async def _save_history(session_id: str, history: History) -> None:
         filename = f"history-{session_id}.json"
@@ -123,7 +153,7 @@ def api(config):
         else:
             return None
 
-    async def _session_human(user: UserDef):
+    async def _session_human(user: UserDef, db: Session):
         try:
             while True:
                 data = await user.ws.receive_json()
@@ -131,6 +161,8 @@ def api(config):
                     m = MessageSubmitted.model_validate(data)
                     session = users_session.get(m.session_id)
                     if session is not None:
+                        await log_message(db, session.session_id, user.user_name, user.target_patient_id, user.role, "User", m.user_msg)
+
                         for u in session.users:
                             if u.user_id == m.user_id:
                                 session.history.history.append(
@@ -139,6 +171,7 @@ def api(config):
                                             "text": m.user_msg
                                             }))
                             else:
+                                await log_message(db, session.session_id, u.user_name, u.target_patient_id, u.role, "Assistant", m.user_msg)
                                 await u.ws.send_json(
                                         MessageForwarded(
                                             session_id=m.session_id,
@@ -201,7 +234,7 @@ def api(config):
             # delete session and userdef
             del s
 
-    async def _session_ai(user: UserDef):
+    async def _session_ai(user: UserDef, db: Session):
         #try:
         if True:
             while True:
@@ -210,6 +243,8 @@ def api(config):
                     m = MessageSubmitted.model_validate(data)
                     session = users_session.get(m.session_id)
                     if session is not None:
+                        await log_message(db, session.session_id, user.user_name, user.target_patient_id, user.role, "User", m.user_msg)
+
                         for u in session.users:
                             if u.user_id == m.user_id:
                                 session.history.history.append(
@@ -227,6 +262,7 @@ def api(config):
                                             "role": u.role,
                                             "text": response_msg,
                                             }))
+                                await log_message(db, session.session_id, "AI", u.assistant_id, u.role, "Assistant", response_msg)
                                 # reply to Human
                                 await user.ws.send_json(
                                     MessageForwarded(
@@ -278,20 +314,21 @@ def api(config):
             del users[user_id]
         """
 
-    def _registration(req: RegistrationRequest):
+    def _registration(req: RegistrationRequest, db: Session):
         user_id = get_id()
+        session_id = str(uuid.uuid4())
         #
         users_waiting[user_id] = UserDef(
                 user_id=user_id,
+                user_name=req.user_name,
                 role=req.user_role,
                 status=Status.Registered.name,
                 target_patient_id=req.target_patient_id,
                 )
         #
         return RegistrationAccepted(
-            #msg_type=MsgType.Registered.name,
-            #user_status=Status.Registered.name,
             user_id=user_id,
+            session_id=session_id,
             )
     #
     # API
@@ -325,10 +362,10 @@ def api(config):
         return details
 
     @app.post("/v1")
-    async def post_request(req: RegistrationRequest):
+    async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
         logger.debug(f"APP POST REQ: {req}")
         if req.msg_type == MsgType.RegistrationRequest.name:
-            return _registration(req)
+            return _registration(req, db)
         """
         else:
             raise HTTPException(status_code=httpcode.HTTP_406_NOT_ACCEPTABLE,
@@ -343,7 +380,7 @@ def api(config):
                -> Established
     """
     @app.websocket("/v1/ws/{user_id}")
-    async def websocket_endpoint(user_id: str, ws: WebSocket):
+    async def websocket_endpoint(user_id: str, ws: WebSocket, db: Session = Depends(get_db)):
         print(f"user_id: {user_id}")
         if users_waiting.get(user_id) is None:
             return PreparationRejected(
@@ -378,7 +415,7 @@ def api(config):
                 await user.ws.send_json(
                     Established(session_id=session_id).dict()
                     )
-                await _session_human(user)
+                await _session_human(user, db)
             else:
                 assistant = _find_peer_ai(user)
                 if assistant:
@@ -412,6 +449,7 @@ def api(config):
                             history.history.append(
                                 MessageInfo(role="system", text=chunk)
                             )
+                            await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk)
                         logger.debug(f"Persona chunks injected for patient ID {patient_id_for_ai}")
 
                         # アシスタントの初期発言を追加
@@ -419,6 +457,7 @@ def api(config):
                         history.history.append(
                             MessageInfo(role="患者", text=initial_bot_message)
                         )
+                        await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message)
                         # 人間のクライアントに初期発言を送信
                         await user.ws.send_json(
                             MessageForwarded(
@@ -432,13 +471,13 @@ def api(config):
                     await user.ws.send_json(
                         Established(session_id=session_id).dict()
                         )
-                    await _session_ai(user)
+                    await _session_ai(user, db)
                 else:
                     # prepare to make a sessoin with a human.
                     await user.ws.send_json(
                             Prepared().dict()
                             )
-                    await _session_human(user)
+                    await _session_human(user, db)
         except WebSocketDisconnect as e:
             logger.debug(f"WS Exception: {user.user_id} {e}")
 
