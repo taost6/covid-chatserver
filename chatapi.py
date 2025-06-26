@@ -5,6 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from typing import List, Union
 from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
 import uuid
 import os
 import asyncio
@@ -128,6 +129,62 @@ def api(config):
         if "error" in details:
             raise HTTPException(status_code=404, detail=details['error'])
         return details
+
+    @app.get("/v1/logs")
+    async def get_logs(db: Session = Depends(get_db)):
+        """対話ログのセッション一覧を取得する"""
+        if not modelDatabase.SessionLocal:
+            raise HTTPException(status_code=503, detail="Database is not initialized.")
+        
+        # サブクエリで各セッションの最初のログIDを取得
+        subquery = db.query(
+            modelDatabase.ChatLog.session_id,
+            func.min(modelDatabase.ChatLog.id).label('min_id')
+        ).filter(
+            modelDatabase.ChatLog.user_role == '保健師',
+            modelDatabase.ChatLog.user_name != 'AI'
+        ).group_by(modelDatabase.ChatLog.session_id).subquery()
+
+        # サブクエリの結果を使って、実際のログエントリを取得
+        sessions = db.query(modelDatabase.ChatLog).join(
+            subquery,
+            modelDatabase.ChatLog.id == subquery.c.min_id
+        ).order_by(
+            desc(modelDatabase.ChatLog.created_at)
+        ).all()
+        
+        return [
+            {
+                "session_id": session.session_id,
+                "user_name": session.user_name,
+                "patient_id": session.patient_id,
+                "started_at": session.created_at.isoformat()
+            } for session in sessions
+        ]
+
+    @app.get("/v1/logs/{session_id}")
+    async def get_log_detail(session_id: str, db: Session = Depends(get_db)):
+        """特定のセッションの対話ログ詳細を取得する"""
+        if not modelDatabase.SessionLocal:
+            raise HTTPException(status_code=503, detail="Database is not initialized.")
+            
+        logs = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id
+        ).order_by(
+            modelDatabase.ChatLog.created_at
+        ).all()
+        
+        if not logs:
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        return [
+            {
+                "id": log.id,
+                "sender": log.sender,
+                "message": log.message,
+                "created_at": log.created_at.isoformat()
+            } for log in logs
+        ]
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
