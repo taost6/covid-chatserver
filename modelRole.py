@@ -6,6 +6,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 import io
 import os
+import json
 from datetime import datetime, timedelta
 import random
 import argparse
@@ -177,6 +178,23 @@ class PatientRoleProvider:
                     value_str = str(value).strip()
                     if value_str:
                         chunks.append(f"【{date_str}の行動履歴】\n{value_str}")
+
+        # --- 最終チャンク: IDと名前の対応表と指示 ---
+        id_name_map = []
+        id_idx = column_indices.get("ID")
+        name_idx = column_indices.get("氏名")
+        if id_idx != -1 and name_idx != -1:
+            for r in self.df.values:
+                if pd.notna(r[id_idx]) and pd.notna(r[name_idx]):
+                    id_name_map.append({"ID": int(r[id_idx]), "name": r[name_idx]})
+        
+        id_name_json = json.dumps(id_name_map, ensure_ascii=False)
+        final_instruction = (
+            "以下に示す情報は、患者IDと名前の対応を表しています。"
+            "ここまでの情報の中に、ID:3などのようにIDが含まれている場合、ユーザーに言及された場合は患者IDをそのまま答えるのではなく、名前に変換してから回答するようにしてください。"
+            f"{id_name_json}"
+        )
+        chunks.append(final_instruction)
 
         return chunks, interview_date_str
 
