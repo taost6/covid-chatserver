@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>対話ログ一覧</title>
+    <link rel="icon" href="data:,">
+    <script src="lib/vue/vue.global.js"></script>
+    <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
+    <script src="lib/vuetify/vuetify.min.js"></script>
+    <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
+</head>
+<body class="bg-grey-lighten-4">
+<div id="app">
+    <v-app>
+        <v-main>
+            <v-container>
+                <v-card rounded="lg" elevation="2">
+                    <v-toolbar color="blue-darken-2" dark>
+                        <v-toolbar-title>
+                            <v-icon start>mdi-history</v-icon>
+                            対話ログ一覧
+                        </v-toolbar-title>
+                    </v-toolbar>
+                    <v-card-text>
+                        <v-data-table
+                            :headers="headers"
+                            :items="sessions"
+                            :loading="loading"
+                            class="elevation-1"
+                            hover
+                            @click:row="showDetail"
+                        >
+                        </v-data-table>
+                    </v-card-text>
+                </v-card>
+            </v-container>
+        </v-main>
+    </v-app>
+</div>
+
+<script>
+async function get_data(url, opt = {}) {
+    opt.headers = { 'Content-Type': 'application/json', ...opt.headers };
+    const res = await fetch(url, opt);
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP error! status: ${res.status}, text: ${errorText}`);
+    }
+    return await res.json();
+}
+
+const { createApp } = Vue;
+const { createVuetify } = Vuetify;
+const vuetify = createVuetify();
+
+const app = createApp({
+    data() {
+        return {
+            loading: true,
+            sessions: [],
+            headers: [
+                { title: '保健師名', key: 'user_name', sortable: true },
+                { title: '患者ID', key: 'patient_id', sortable: true },
+                { title: '開始日時', key: 'started_at', sortable: true },
+                { title: 'セッションID', key: 'session_id', sortable: false },
+            ],
+            protocol: null,
+            host: null,
+        };
+    },
+    mounted() {
+        const ret = /^(https?):\/\/([^/]+)/.exec(document.baseURI);
+        if (ret) {
+            this.protocol = ret[1];
+            this.host = ret[2];
+            this.fetchLogs();
+        } else {
+            console.error("URLの解析に失敗しました。");
+        }
+    },
+    methods: {
+        async fetchLogs() {
+            this.loading = true;
+            try {
+                const url = `${this.protocol}://${this.host}/v1/logs`;
+                const data = await get_data(url);
+                this.sessions = data.map(s => ({
+                    ...s,
+                    started_at: new Date(s.started_at).toLocaleString()
+                }));
+            } catch (err) {
+                console.error("ログ一覧の取得に失敗:", err);
+            } finally {
+                this.loading = false;
+            }
+        },
+        showDetail(event, { item }) {
+            window.location.href = `history_detail.html?session_id=${item.session_id}`;
+        }
+    }
+});
+app.use(vuetify).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>対話ログ詳細</title>
+    <link rel="icon" href="data:,">
+    <script src="lib/vue/vue.global.js"></script>
+    <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
+    <script src="lib/vuetify/vuetify.min.js"></script>
+    <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
+    <style>
+        .message-bubble-user {
+            background-color: #2563eb !important;
+            color: white;
+        }
+        .message-bubble-patient {
+            background-color: #f3f4f6 !important;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body class="bg-grey-lighten-4">
+<div id="app">
+    <v-app>
+        <v-main>
+            <v-container>
+                <v-card rounded="lg" elevation="2">
+                    <v-toolbar color="blue-darken-2" dark>
+                        <v-toolbar-title>
+                            <v-icon start>mdi-file-document-outline</v-icon>
+                            対話ログ詳細
+                        </v-toolbar-title>
+                        <v-spacer></v-spacer>
+                        <v-btn prepend-icon="mdi-arrow-left" @click="goBack">一覧へ戻る</v-btn>
+                    </v-toolbar>
+                    <v-card-subtitle class="pa-3">
+                        <strong>セッションID:</strong> {{ sessionId }}
+                    </v-card-subtitle>
+                    <v-divider></v-divider>
+                    <v-card-text style="height: 75vh; overflow-y: auto;" class="pa-4">
+                        <div v-if="loading" class="d-flex justify-center align-center fill-height">
+                            <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
+                        </div>
+                        <div v-else>
+                            <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-4" :class="getJustify(item.sender)">
+                                <v-sheet max-width="70%" class="rounded-lg pa-3" :elevation="2" :class="getBubbleClass(item.sender)">
+                                    <div class="d-flex align-start">
+                                        <v-icon class="mr-2 mt-1" :color="getIconColor(item.sender)">{{ getIcon(item.sender) }}</v-icon>
+                                        <div class="flex-grow-1">
+                                            <div class="text-body-1" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
+                                            <div class="text-caption text-right mt-1" :class="getTextColor(item.sender)">{{ new Date(item.created_at).toLocaleString() }}</div>
+                                        </div>
+                                    </div>
+                                </v-sheet>
+                            </div>
+                        </div>
+                    </v-card-text>
+                </v-card>
+            </v-container>
+        </v-main>
+    </v-app>
+</div>
+
+<script>
+async function get_data(url, opt = {}) {
+    opt.headers = { 'Content-Type': 'application/json', ...opt.headers };
+    const res = await fetch(url, opt);
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP error! status: ${res.status}, text: ${errorText}`);
+    }
+    return await res.json();
+}
+
+const { createApp } = Vue;
+const { createVuetify } = Vuetify;
+const vuetify = createVuetify();
+
+const app = createApp({
+    data() {
+        return {
+            loading: true,
+            chatHistory: [],
+            sessionId: '',
+            protocol: null,
+            host: null,
+        };
+    },
+    mounted() {
+        const ret = /^(https?):\/\/([^/]+)/.exec(document.baseURI);
+        if (ret) {
+            this.protocol = ret[1];
+            this.host = ret[2];
+            const urlParams = new URLSearchParams(window.location.search);
+            this.sessionId = urlParams.get('session_id');
+            if (this.sessionId) {
+                this.fetchLogDetail();
+            } else {
+                this.loading = false;
+                console.error("セッションIDが指定されていません。");
+            }
+        } else {
+            console.error("URLの解析に失敗しました。");
+        }
+    },
+    methods: {
+        async fetchLogDetail() {
+            this.loading = true;
+            try {
+                const url = `${this.protocol}://${this.host}/v1/logs/${this.sessionId}`;
+                this.chatHistory = await get_data(url);
+            } catch (err) {
+                console.error("ログ詳細の取得に失敗:", err);
+            } finally {
+                this.loading = false;
+            }
+        },
+        goBack() {
+            window.location.href = 'history.html';
+        },
+        getJustify(sender) {
+            if (sender === 'User') return 'justify-end';
+            if (sender === 'Assistant') return 'justify-start';
+            return 'justify-center';
+        },
+        getBubbleClass(sender) {
+            if (sender === 'User') return 'message-bubble-user';
+            if (sender === 'Assistant') return 'message-bubble-patient';
+            return 'bg-grey-lighten-2';
+        },
+        getIcon(sender) {
+            if (sender === 'User') return 'mdi-account-tie-woman';
+            if (sender === 'Assistant') return 'mdi-account';
+            return 'mdi-robot';
+        },
+        getIconColor(sender) {
+            if (sender === 'User') return 'white';
+            return 'grey-darken-1';
+        },
+        getTextColor(sender) {
+            if (sender === 'User') return 'text-white';
+            return 'text-grey-darken-1';
+        }
+    }
+});
+app.use(vuetify).mount('#app');
+</script>
+</body>
+</html>
