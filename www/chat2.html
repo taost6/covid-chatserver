@@ -198,7 +198,7 @@
                                 <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'user' ? 'message-bubble-user' : 'message-bubble-patient'">
                                     <div class="d-flex align-start">
                                         <v-icon class="mr-2 mt-1">{{ item.icon }}</v-icon>
-                                        <div class="text-body-1" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
+                                        <div :class="chatHistoryFontSize" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
                                     </div>
                                 </v-sheet>
                             </div>
@@ -340,6 +340,7 @@ const app = createApp({
             chatInputDisabled: true,
             chatInputLock: false,
             chatHitsoryFontSizeNum: 1,
+            chatHistoryFontSize: 'text-body-1',
             confSubmitWithEnter: false,
             confSubmitThenClear: true,
             // dialogs
@@ -363,12 +364,29 @@ const app = createApp({
             console.error("URLの解析に失敗しました。");
             this.MessageToUser = "アプリケーションのURLの解析に失敗しました。";
         }
+
+        const savedFontSize = localStorage.getItem('chatFontSize');
+        if (savedFontSize) {
+            this.chatHitsoryFontSizeNum = parseInt(savedFontSize, 10);
+            this.updateFontSizeClass(this.chatHitsoryFontSizeNum);
+        }
+        const savedSubmitWithEnter = localStorage.getItem('chatSubmitWithEnter');
+        if (savedSubmitWithEnter) {
+            this.confSubmitWithEnter = JSON.parse(savedSubmitWithEnter);
+        }
     },
     watch: {
         patientId(newId, oldId) {
             if (newId && newId !== oldId && this.roleNameDraft === '保健師') {
                 this.fetchPatientDetails(newId);
             }
+        },
+        chatHitsoryFontSizeNum(newValue) {
+            localStorage.setItem('chatFontSize', newValue);
+            this.updateFontSizeClass(newValue);
+        },
+        confSubmitWithEnter(newValue) {
+            localStorage.setItem('chatSubmitWithEnter', JSON.stringify(newValue));
         }
     },
     methods: {
@@ -550,19 +568,22 @@ const app = createApp({
                 mainContent.scrollTop = mainContent.scrollHeight;
             }
         },
+        updateFontSizeClass(value) {
+            if (value == 0) {
+                this.chatHistoryFontSize = 'text-subtitle-2';
+            } else if (value == 1) {
+                this.chatHistoryFontSize = 'text-body-1';
+            } else if (value == 2) {
+                this.chatHistoryFontSize = 'text-h6';
+            }
+        },
         closeAndChatHistoryToBottom() {
             this.drawer = false;
             this.scrollToBottom();
         },
         changeFontSize(value) {
-            if (value == 0) {
-                this.chatHistoryFontSize = 'text-h6';
-            } else if (value == 1) {
-                this.chatHistoryFontSize = 'text-h5';
-            } else if (value == 2) {
-                this.chatHistoryFontSize = 'text-h4';
-            }
-            this.chatHistoryToBottom();
+            this.updateFontSizeClass(value);
+            this.scrollToBottom();
         },
         printPage() {
             this.drawer = false;

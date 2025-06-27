@@ -162,6 +162,7 @@ def api(config):
             {
                 "session_id": session.session_id,
                 "user_name": session.user_name,
+                "user_role": session.user_role,
                 "patient_id": session.patient_id,
                 "started_at": session.created_at.isoformat()
             } for session in sessions
