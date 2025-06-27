@@ -47,7 +47,7 @@
                             <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-4" :class="getJustify(item.sender)">
                                 <v-sheet max-width="70%" class="rounded-lg pa-3" :elevation="2" :class="getBubbleClass(item.sender)">
                                     <div class="d-flex align-start">
-                                        <v-icon class="mr-2 mt-1" :color="getIconColor(item.sender)">{{ getIcon(item.sender) }}</v-icon>
+                                        <v-icon class="mr-2 mt-1" :color="getIconColor(item.sender)">{{ getIcon(item.sender, item.role) }}</v-icon>
                                         <div class="flex-grow-1">
                                             <div class="text-body-1" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
                                             <div class="text-caption text-right mt-1" :class="getTextColor(item.sender)">{{ new Date(item.created_at).toLocaleString() }}</div>
@@ -130,9 +130,12 @@ const app = createApp({
             if (sender === 'Assistant') return 'message-bubble-patient';
             return 'bg-grey-lighten-2';
         },
-        getIcon(sender) {
-            if (sender === 'User') return 'mdi-account-tie-woman';
-            if (sender === 'Assistant') return 'mdi-account';
+        getIcon(sender, role) {
+            if (sender === 'User') {
+                return role === '保健師' ? 'mdi-account-tie-woman' : 'mdi-account';
+            } else if (sender === 'Assistant') {
+                return role === '患者' ? 'mdi-account' : 'mdi-account-tie-woman';
+            }
             return 'mdi-robot';
         },
         getIconColor(sender) {

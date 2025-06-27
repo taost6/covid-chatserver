@@ -246,6 +246,24 @@ class PatientRoleProvider:
 
         return details
 
+    def get_interviewer_prompt_chunks(self) -> (List[str], str):
+        """
+        保健師AI用のプロンプトと初期メッセージを返す。
+        """
+        prompt = (
+            "あなたは日本の自治体に所属する保健師です。\n"
+            "ユーザーは感染症に罹患した患者もしくは濃厚接触者です。\n"
+            "これからあなたには、ユーザーに対する聞き取りを行ってもらいます。\n"
+            "これは積極的疫学調査と呼ばれるもので、その中でも「聞き取り」とは、\n"
+            "感染症の発生や拡大を把握・制御するために、患者や関係者から直接情報を収集するプロセスを指します。\n"
+            "具体的には、インタビューを通じて、感染経路、接触者、症状の経過、行動履歴（いつ、どこにいったか、誰と会ったかなど）、リスク要因などを詳細に聞き出すことを意味します。\n"
+            "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
+            "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
+        )
+        initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
+        
+        return [prompt], initial_message
+
     def get_available_patient_ids(self) -> list[str]:
         if self.df is None:
             raise RuntimeError("Provider is not initialized. Call `await provider.initialize()` first.")
