@@ -181,18 +181,23 @@
                                 <v-icon start :color="userStatus === 'Established' ? 'green' : 'orange'">
                                     {{ userStatus === 'Established' ? 'mdi-circle' : 'mdi-circle-outline' }}
                                 </v-icon>
-                                {{ (patientInfo.name && roleNameDraft === '保健師') ? patientInfo.name : '患者' }}さん
-                                <span v-if="patientInfo.id && roleNameDraft === '保健師'">
-                                    （患者ID: <span class="font-weight-bold text-blue-darken-3">{{ patientInfo.id }}</span>）
+                                <span v-if="roleNameDraft === '保健師'">
+                                    {{ patientInfo.name ? patientInfo.name : '患者' }}さん
+                                    <span v-if="patientInfo.id">
+                                        （患者ID: <span class="font-weight-bold text-blue-darken-3">{{ patientInfo.id }}</span>）
+                                    </span>
+                                </span>
+                                <span v-else>
+                                    保健師
                                 </span>
                             </v-toolbar-title>
                         </v-toolbar>
 
                         <v-card-text id="chat-history-container">
-                            <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-2" :class="item.sender === 'interviewer' ? 'justify-end' : 'justify-start'">
-                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'interviewer' ? 'message-bubble-user' : 'message-bubble-patient'">
+                            <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-2" :class="item.sender === 'user' ? 'justify-end' : 'justify-start'">
+                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'user' ? 'message-bubble-user' : 'message-bubble-patient'">
                                     <div class="d-flex align-start">
-                                        <v-icon class="mr-2 mt-1">{{ item.sender === 'interviewer' ? 'mdi-account-tie-woman' : 'mdi-account' }}</v-icon>
+                                        <v-icon class="mr-2 mt-1">{{ item.icon }}</v-icon>
                                         <div class="text-body-1" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
                                     </div>
                                 </v-sheet>
@@ -483,8 +488,9 @@ const app = createApp({
                         break;
                     case 'MessageForwarded':
                         this.chatHistory.push({
-                            sender: 'patient',
+                            sender: 'assistant',
                             message: ret.user_msg,
+                            icon: this.roleNameDraft === '保健師' ? 'mdi-account' : 'mdi-account-tie-woman'
                         });
                         this.chatInputLock = false;
                         this.scrollToBottom();
@@ -508,8 +514,9 @@ const app = createApp({
 
             this.chatInputLock = true;
             this.chatHistory.push({
-                sender: 'interviewer',
+                sender: 'user',
                 message: text,
+                icon: this.roleNameDraft === '保健師' ? 'mdi-account-tie-woman' : 'mdi-account'
             });
             this.scrollToBottom();
 

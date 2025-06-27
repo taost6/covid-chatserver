@@ -65,12 +65,18 @@ def _find_peer_human(user: UserDef) -> UserDef:
     return None
 
 def _find_peer_ai(user: UserDef) -> AssistantDef:
-    if user.role != "保健師":
-        return None
-    return AssistantDef(
-        user_id=get_id(), role="患者",
-        assistant_id=choice(json.load(open("assistants.json"))),
-    )
+    assistants = json.load(open("assistants.json"))
+    if user.role == "保健師":
+        return AssistantDef(
+            user_id=get_id(), role="患者",
+            assistant_id=assistants[0],
+        )
+    elif user.role == "患者":
+        return AssistantDef(
+            user_id=get_id(), role="保健師",
+            assistant_id=assistants[1],
+        )
+    return None
 
 def _find_user_session(user_id: str) -> APISession:
     for s in users_session.values():
@@ -141,8 +147,7 @@ def api(config):
             modelDatabase.ChatLog.session_id,
             func.min(modelDatabase.ChatLog.id).label('min_id')
         ).filter(
-            modelDatabase.ChatLog.user_role == '保健師',
-            modelDatabase.ChatLog.user_name != 'AI'
+            modelDatabase.ChatLog.sender == 'User'
         ).group_by(modelDatabase.ChatLog.session_id).subquery()
 
         # サブクエリの結果を使って、実際のログエントリを取得
@@ -181,6 +186,7 @@ def api(config):
             {
                 "id": log.id,
                 "sender": log.sender,
+                "role": log.user_role,
                 "message": log.message,
                 "created_at": log.created_at.isoformat()
             } for log in logs
@@ -227,26 +233,39 @@ def api(config):
                 if assistant:
                     session_id = get_id()
                     assistant.thread_id = await oaw.create_thread()
-                    history = History(assistant={"role": "患者", "assistant_id": assistant.assistant_id})
+                    history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
                     session = APISession(users=[user, assistant], history=history, session_id=session_id)
                     users_session[session_id] = session
                     del users_waiting[user.user_id]
 
-                    patient_id_for_ai = user.target_patient_id or "1"
-                    prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                    if assistant.role == "患者":
+                        patient_id_for_ai = user.target_patient_id or "1"
+                        prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                        
+                        if interview_date_str:
+                            for chunk in prompt_chunks:
+                                await oaw.add_message_to_thread(assistant.thread_id, chunk)
+                                history.history.append(MessageInfo(role="system", text=chunk))
+                                await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
+                            
+                            initial_bot_message = "何でも聞いてください"
+                            history.history.append(MessageInfo(role="患者", text=initial_bot_message))
+                            await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger)
+                            await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
+                        else:
+                            logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
+                            interview_date_str = datetime.now().strftime("%Y年%m月%d日")
                     
-                    if interview_date_str:
+                    elif assistant.role == "保健師":
+                        prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks()
                         for chunk in prompt_chunks:
                             await oaw.add_message_to_thread(assistant.thread_id, chunk)
                             history.history.append(MessageInfo(role="system", text=chunk))
-                            await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
+                            await log_message(db, session_id, user.user_name, "N/A", user.role, "System", chunk, logger)
                         
-                        initial_bot_message = "何でも聞いてください"
-                        history.history.append(MessageInfo(role="患者", text=initial_bot_message))
-                        await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger)
+                        history.history.append(MessageInfo(role="保健師", text=initial_bot_message))
+                        await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger)
                         await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
-                    else:
-                        logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
                         interview_date_str = datetime.now().strftime("%Y年%m月%d日")
 
                     await user.ws.send_json(Established(session_id=session_id, interview_date=interview_date_str).dict())
