@@ -374,24 +374,22 @@ def api(config):
                             db_session.interview_date = interview_date_str
                             db.commit()
                             logger.info(f"Saved new interview_date: {interview_date_str}")
+                        else:
+                            prompt_chunks, _ = role_provider.get_patient_prompt_chunks(patient_id_for_ai, interview_date_str=db_session.interview_date)
+
+                        if prompt_needed and interview_date_str:
+                            for chunk in prompt_chunks:
+                                await oaw.add_message_to_thread(assistant.thread_id, chunk)
+                                history.history.append(MessageInfo(role="system", text=chunk))
+                                await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
                             
-                            if interview_date_str:
-                                for chunk in prompt_chunks:
-                                    await oaw.add_message_to_thread(assistant.thread_id, chunk)
-                                    history.history.append(MessageInfo(role="system", text=chunk))
-                                    await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
-                                
-                                initial_bot_message = "何でも聞いてください"
-                                history.history.append(MessageInfo(role="患者", text=initial_bot_message))
-                                await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
-                            else:
-                                logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
-                        
-                        if not interview_date_str:
-                             interview_date_str = db_session.created_at.strftime("%Y年%m月%d日")
-                    
+                            initial_bot_message = "何でも聞いてください"
+                            history.history.append(MessageInfo(role="患者", text=initial_bot_message))
+                            await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
+                        elif prompt_needed:
+                             logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
+
                     elif assistant.role == "保健師":
-                        # For interviewer AI, interview_date is less critical but we'll manage it anyway.
                         if prompt_needed:
                             interview_date_str = datetime.now().strftime("%Y年%m月%d日")
                             db_session.interview_date = interview_date_str
@@ -406,11 +404,9 @@ def api(config):
                             history.history.append(MessageInfo(role="保健師", text=initial_bot_message))
                             await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger, is_initial_message=True)
                             await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
-                        
-                        if not interview_date_str:
-                            interview_date_str = db_session.created_at.strftime("%Y年%m月%d日")
 
-                    await user.ws.send_json(Established(session_id=session_id, interview_date=interview_date_str).dict())
+                    final_interview_date = db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日")
+                    await user.ws.send_json(Established(session_id=session_id, interview_date=final_interview_date).dict())
                     await _session_handler(user, db, logger, oaw)
                 else:
                     await user.ws.send_json(Prepared().dict())
