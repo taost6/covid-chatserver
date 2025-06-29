@@ -214,7 +214,7 @@ def api(config):
             "patient_id": db_session.patient_id,
             "chat_history": chat_history,
             "patient_info": patient_info,
-            "interview_date": db_session.created_at.strftime("%Y年%m月%d日"),
+            "interview_date": db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日"),
         }
 
     @app.get("/v1/logs")
@@ -346,7 +346,8 @@ def api(config):
                         db.commit()
                         db.refresh(db_session)
 
-                    # Reuse or create thread_id
+                    # Reuse or create thread_id and interview_date
+                    interview_date_str = db_session.interview_date
                     if db_session.thread_id:
                         assistant.thread_id = db_session.thread_id
                         logger.info(f"Reusing existing thread_id: {assistant.thread_id}")
@@ -354,8 +355,7 @@ def api(config):
                     else:
                         assistant.thread_id = await oaw.create_thread()
                         db_session.thread_id = assistant.thread_id
-                        db.commit()
-                        logger.info(f"Created and saved new thread_id: {assistant.thread_id}")
+                        # interview_date is set below, so commit together
                         prompt_needed = True
 
                     history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
@@ -365,10 +365,13 @@ def api(config):
 
                     if assistant.role == "患者":
                         patient_id_for_ai = user.target_patient_id or "1"
-                        _, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai) # Get date anyway
                         
                         if prompt_needed:
-                            prompt_chunks, _ = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                            prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                            db_session.interview_date = interview_date_str
+                            db.commit()
+                            logger.info(f"Saved new interview_date: {interview_date_str}")
+                            
                             if interview_date_str:
                                 for chunk in prompt_chunks:
                                     await oaw.add_message_to_thread(assistant.thread_id, chunk)
@@ -382,10 +385,15 @@ def api(config):
                                 logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
                         
                         if not interview_date_str:
-                             interview_date_str = datetime.now().strftime("%Y年%m月%d日")
+                             interview_date_str = db_session.created_at.strftime("%Y年%m月%d日")
                     
                     elif assistant.role == "保健師":
+                        # For interviewer AI, interview_date is less critical but we'll manage it anyway.
                         if prompt_needed:
+                            interview_date_str = datetime.now().strftime("%Y年%m月%d日")
+                            db_session.interview_date = interview_date_str
+                            db.commit()
+
                             prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks()
                             for chunk in prompt_chunks:
                                 await oaw.add_message_to_thread(assistant.thread_id, chunk)
@@ -396,7 +404,8 @@ def api(config):
                             await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger, is_initial_message=True)
                             await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
                         
-                        interview_date_str = datetime.now().strftime("%Y年%m月%d日")
+                        if not interview_date_str:
+                            interview_date_str = db_session.created_at.strftime("%Y年%m月%d日")
 
                     await user.ws.send_json(Established(session_id=session_id, interview_date=interview_date_str).dict())
                     await _session_handler(user, db, logger, oaw)
