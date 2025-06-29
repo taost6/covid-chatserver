@@ -4,6 +4,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
 import os
 
+# 新しいSessionモデルをインポート
+from modelSession import Base as SessionBase
+
 # これらはアプリケーション起動時に initialize_database() によって初期化されます
 engine = None
 SessionLocal = None
@@ -29,10 +32,11 @@ class ChatLog(Base):
     sender = Column(String) # System, User, Assistant
     message = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    completed = Column(Boolean, default=False, nullable=False, index=True)
 
 def init_db():
     """データベーステーブルを作成します。"""
     if engine is None:
         raise RuntimeError("データベースが初期化されていません。先に initialize_database() を呼び出してください。")
+    # 両方のモデルのテーブルを作成
     Base.metadata.create_all(bind=engine)
+    SessionBase.metadata.create_all(bind=engine)
