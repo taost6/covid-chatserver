@@ -19,6 +19,7 @@ from modelUserDef import *
 from modelHistory import *
 from modelRole import PatientRoleProvider
 import modelDatabase
+from modelSession import Session as SessionModel # New
 from openai_assistant import OpenAIAssistantWrapper
 
 class APISession(BaseModel):
@@ -150,21 +151,25 @@ def api(config):
     @app.get("/v1/session/{session_id}")
     async def get_session_status(session_id: str, db: Session = Depends(get_db)):
         """指定されたセッションが再開可能か確認し、関連情報を返す"""
+        # Query the new sessions table
+        db_session = db.query(SessionModel).filter(
+            SessionModel.session_id == session_id,
+            SessionModel.status == 'active'
+        ).first()
+
+        if not db_session:
+            raise HTTPException(status_code=404, detail="Active session not found.")
+
+        # If session is found, proceed to gather history and other details
         if role_provider.df is None:
             logger.warning("Role provider not initialized in get_session_status. Initializing...")
             await role_provider.initialize()
             if role_provider.df is None:
                 raise HTTPException(status_code=503, detail="Patient data could not be loaded on demand.")
 
-        first_log = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.session_id == session_id
-        ).order_by(modelDatabase.ChatLog.id.asc()).first()
-
-        if not first_log or first_log.completed:
-            raise HTTPException(status_code=404, detail="Session not found or has been completed.")
-
         history_logs = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.session_id == session_id
+            modelDatabase.ChatLog.session_id == session_id,
+            modelDatabase.ChatLog.sender != 'System'  # システムログは除外
         ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
 
         chat_history = []
@@ -183,18 +188,18 @@ def api(config):
                 })
 
         patient_info = {}
-        if first_log.user_role == '保健師' and first_log.patient_id:
-            patient_info = role_provider.get_patient_details(first_log.patient_id)
+        if db_session.user_role == '保健師' and db_session.patient_id:
+            patient_info = role_provider.get_patient_details(db_session.patient_id)
 
         return {
             "session_id": session_id,
-            "user_id": first_log.user_name, # 簡易的な実装。今後修正が必要になるかもしれない。
-            "user_name": first_log.user_name,
-            "user_role": first_log.user_role,
-            "patient_id": first_log.patient_id,
+            "user_id": db_session.user_name, # Simplification
+            "user_name": db_session.user_name,
+            "user_role": db_session.user_role,
+            "patient_id": db_session.patient_id,
             "chat_history": chat_history,
             "patient_info": patient_info,
-            "interview_date": first_log.created_at.strftime("%Y年%m月%d日"),
+            "interview_date": db_session.created_at.strftime("%Y年%m月%d日"),
         }
 
     @app.get("/v1/logs")
@@ -203,27 +208,8 @@ def api(config):
         if not modelDatabase.SessionLocal:
             raise HTTPException(status_code=503, detail="Database is not initialized.")
 
-        # 各セッションにおけるユーザーからの最初のメッセージIDを取得
-        first_message_ids_query = db.query(
-            func.min(modelDatabase.ChatLog.id)
-        ).filter(
-            modelDatabase.ChatLog.sender == 'User'
-        ).group_by(
-            modelDatabase.ChatLog.session_id
-        ).all()
-
-        # IDのリストが空の場合は、空のリストを返す
-        if not first_message_ids_query:
-            return []
-
-        # 取得したIDのリストを平坦化
-        first_message_ids = [id for (id,) in first_message_ids_query]
-
-        # IDリストに一致するログエントリを取得
-        sessions = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.id.in_(first_message_ids)
-        ).order_by(
-            desc(modelDatabase.ChatLog.created_at)
+        sessions = db.query(SessionModel).order_by(
+            desc(SessionModel.created_at)
         ).all()
         
         return [
@@ -301,6 +287,17 @@ def api(config):
                 assistant = _find_peer_ai(user)
                 if assistant:
                     session_id = get_id()
+                    # Create a new session record in the database
+                    new_session = SessionModel(
+                        session_id=session_id,
+                        user_name=user.user_name,
+                        user_role=user.role,
+                        patient_id=user.target_patient_id if user.role == "保健師" else None,
+                        status='active'
+                    )
+                    db.add(new_session)
+                    db.commit()
+
                     assistant.thread_id = await oaw.create_thread()
                     history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
                     session = APISession(users=[user, assistant], history=history, session_id=session_id)
@@ -381,7 +378,14 @@ def api(config):
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
                     await _save_history(session.session_id, session.history, logger)
-                    await _mark_session_completed(db, session.session_id, logger)
+                    
+                    # Mark session as completed in the new table
+                    db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+                    if db_session:
+                        db_session.status = 'completed'
+                        db_session.completed_at = datetime.now()
+                        db.commit()
+
                     for u in session.users:
                         if hasattr(u, 'ws') and u.ws:
                             reason = "EndSession request is accepted." if u.user_id == m.user_id else "Peer sent the end of session."
