@@ -150,6 +150,12 @@ def api(config):
     @app.get("/v1/session/{session_id}")
     async def get_session_status(session_id: str, db: Session = Depends(get_db)):
         """指定されたセッションが再開可能か確認し、関連情報を返す"""
+        if role_provider.df is None:
+            logger.warning("Role provider not initialized in get_session_status. Initializing...")
+            await role_provider.initialize()
+            if role_provider.df is None:
+                raise HTTPException(status_code=503, detail="Patient data could not be loaded on demand.")
+
         first_log = db.query(modelDatabase.ChatLog).filter(
             modelDatabase.ChatLog.session_id == session_id
         ).order_by(modelDatabase.ChatLog.id.asc()).first()
@@ -196,19 +202,26 @@ def api(config):
         """対話ログのセッション一覧を取得する"""
         if not modelDatabase.SessionLocal:
             raise HTTPException(status_code=503, detail="Database is not initialized.")
-        
-        # サブクエリで各セッションの最初のログIDを取得
-        subquery = db.query(
-            modelDatabase.ChatLog.session_id,
-            func.min(modelDatabase.ChatLog.id).label('min_id')
+
+        # 各セッションにおけるユーザーからの最初のメッセージIDを取得
+        first_message_ids_query = db.query(
+            func.min(modelDatabase.ChatLog.id)
         ).filter(
             modelDatabase.ChatLog.sender == 'User'
-        ).group_by(modelDatabase.ChatLog.session_id).subquery()
+        ).group_by(
+            modelDatabase.ChatLog.session_id
+        ).all()
 
-        # サブクエリの結果を使って、実際のログエントリを取得
-        sessions = db.query(modelDatabase.ChatLog).join(
-            subquery,
-            modelDatabase.ChatLog.id == subquery.c.min_id
+        # IDのリストが空の場合は、空のリストを返す
+        if not first_message_ids_query:
+            return []
+
+        # 取得したIDのリストを平坦化
+        first_message_ids = [id for (id,) in first_message_ids_query]
+
+        # IDリストに一致するログエントリを取得
+        sessions = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.id.in_(first_message_ids)
         ).order_by(
             desc(modelDatabase.ChatLog.created_at)
         ).all()
