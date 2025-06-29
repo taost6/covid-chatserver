@@ -15,6 +15,7 @@ class UserDef(BaseModel):
     status: str  = Field(description="User Status")
     ws: Any      = Field(None, description="Placeholder of WebSocket")
     target_patient_id: Optional[str] = Field(None, description="保健師が指定した患者ID")
+    session_id: Optional[str] = Field(None, description="Session ID")
     # session をここでも管理すると便利かも
     #session: Any = Field(None, description="Placeholder of the session")
 

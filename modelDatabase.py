@@ -31,6 +31,7 @@ class ChatLog(Base):
     user_role = Column(String)
     sender = Column(String) # System, User, Assistant
     message = Column(Text)
+    is_initial_message = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 def init_db():
