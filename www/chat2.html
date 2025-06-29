@@ -358,7 +358,7 @@ const app = createApp({
         if (ret) {
             this.protocol = ret[1];
             this.host = ret[2];
-            this.fetchPatientIds();
+            this.restoreSession();
         } else {
             console.error("URLの解析に失敗しました。");
             this.MessageToUser = "アプリケーションのURLの解析に失敗しました。";
@@ -430,6 +430,50 @@ const app = createApp({
             this.roleNameBtnDisabled = false;
             this.chatInputDisabled = true;
         },
+        async restoreSession() {
+            const sessionInfo = localStorage.getItem('activeSession');
+            if (!sessionInfo) {
+                this.fetchPatientIds();
+                return;
+            }
+
+            const { sessionId, userId } = JSON.parse(sessionInfo);
+            if (!sessionId || !userId) {
+                this.fetchPatientIds();
+                return;
+            }
+
+            try {
+                const url = `${this.protocol}://${this.host}/v1/session/${sessionId}`;
+                const sessionData = await get_data(url);
+
+                // Restore state
+                this.sessionId = sessionData.session_id;
+                this.userId = userId; // Use the one from localStorage
+                this.userName = sessionData.user_name;
+                this.roleNameDraft = sessionData.user_role;
+                this.roleNameText = sessionData.user_role;
+                this.patientId = sessionData.patient_id;
+                this.chatHistory = sessionData.chat_history;
+                this.patientInfo = sessionData.patient_info;
+                this.interviewDate = sessionData.interview_date;
+
+                // Update UI
+                this.registrationDialog = false;
+                this.roleNameBtnDisabled = true;
+                this.MessageToUser = 'セッションを復元しました。';
+                this.userStatus = 'Established';
+                this.chatInputDisabled = false;
+
+                this.connectWebSocket(true); // Pass a flag to indicate it's a reconnection
+
+            } catch (err) {
+                console.error("セッションの復元に失敗:", err);
+                this.MessageToUser = "セッションの復元に失敗しました。新しいセッションを開始してください。";
+                localStorage.removeItem('activeSession');
+                this.fetchPatientIds();
+            }
+        },
         sessionClosed() {
             this.MessageToUser = '接続が切れました。再度ロールを選択してください。';
             if (this.ws) {
@@ -473,7 +517,8 @@ const app = createApp({
                     this.userStatus = res.user_status;
                     if (res.msg_type === 'RegistrationAccepted') {
                         this.MessageToUser = '登録完了。相手を待っています...';
-                        this.connectWebSocket();
+                        localStorage.setItem('activeSession', JSON.stringify({ sessionId: res.session_id, userId: res.user_id }));
+                        this.connectWebSocket(false);
                     } else {
                         this.MessageToUser = '登録に失敗しました。';
                     }
@@ -484,10 +529,18 @@ const app = createApp({
                     this.roleNameBtnDisabled = false;
                 });
         },
-        connectWebSocket() {
+        connectWebSocket(isReconnection = false) {
             const wsProtocol = this.protocol === 'https' ? 'wss' : 'ws';
             const url = `${wsProtocol}://${this.host}/v1/ws/${this.userId}`;
             this.ws = new WebSocket(url);
+
+            this.ws.onopen = () => {
+                if (isReconnection) {
+                    this.MessageToUser = '再接続しました。チャットを続けられます。';
+                } else {
+                    // This message is handled by the onmessage handler now
+                }
+            };
 
             this.ws.onmessage = (event) => {
                 const ret = JSON.parse(event.data);
@@ -558,6 +611,7 @@ const app = createApp({
                     session_id: this.sessionId,
                     user_id: this.userId,
                 }));
+                localStorage.removeItem('activeSession');
             }
         },
         async scrollToBottom() {

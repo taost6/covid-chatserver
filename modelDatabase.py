@@ -29,6 +29,7 @@ class ChatLog(Base):
     sender = Column(String) # System, User, Assistant
     message = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    completed = Column(Boolean, default=False, nullable=False, index=True)
 
 def init_db():
     """データベーステーブルを作成します。"""

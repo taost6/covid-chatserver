@@ -51,6 +51,17 @@ async def log_message(db: Session, session_id: str, user_name: str, patient_id: 
         logger.error(f"Failed to log message: {e}")
         db.rollback()
 
+async def _mark_session_completed(db: Session, session_id: str, logger):
+    try:
+        db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id
+        ).update({modelDatabase.ChatLog.completed: True})
+        db.commit()
+        logger.debug(f"Session {session_id} marked as completed.")
+    except Exception as e:
+        logger.error(f"Failed to mark session as completed: {e}")
+        db.rollback()
+
 async def _save_history(session_id: str, history: History, logger) -> None:
     filename = f"history-{session_id}.json"
     with open(filename, "w", encoding="utf-8") as fd:
@@ -135,6 +146,50 @@ def api(config):
         if "error" in details:
             raise HTTPException(status_code=404, detail=details['error'])
         return details
+
+    @app.get("/v1/session/{session_id}")
+    async def get_session_status(session_id: str, db: Session = Depends(get_db)):
+        """指定されたセッションが再開可能か確認し、関連情報を返す"""
+        first_log = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id
+        ).order_by(modelDatabase.ChatLog.id.asc()).first()
+
+        if not first_log or first_log.completed:
+            raise HTTPException(status_code=404, detail="Session not found or has been completed.")
+
+        history_logs = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id
+        ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
+
+        chat_history = []
+        for log in history_logs:
+            if log.sender == 'User':
+                chat_history.append({
+                    "sender": "user",
+                    "message": log.message,
+                    "icon": 'mdi-account-tie-woman' if log.user_role == '保健師' else 'mdi-account'
+                })
+            elif log.sender == 'Assistant':
+                chat_history.append({
+                    "sender": "assistant",
+                    "message": log.message,
+                    "icon": 'mdi-account' if log.user_role == '保健師' else 'mdi-account-tie-woman'
+                })
+
+        patient_info = {}
+        if first_log.user_role == '保健師' and first_log.patient_id:
+            patient_info = role_provider.get_patient_details(first_log.patient_id)
+
+        return {
+            "session_id": session_id,
+            "user_id": first_log.user_name, # 簡易的な実装。今後修正が必要になるかもしれない。
+            "user_name": first_log.user_name,
+            "user_role": first_log.user_role,
+            "patient_id": first_log.patient_id,
+            "chat_history": chat_history,
+            "patient_info": patient_info,
+            "interview_date": first_log.created_at.strftime("%Y年%m月%d日"),
+        }
 
     @app.get("/v1/logs")
     async def get_logs(db: Session = Depends(get_db)):
@@ -313,6 +368,7 @@ def api(config):
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
                     await _save_history(session.session_id, session.history, logger)
+                    await _mark_session_completed(db, session.session_id, logger)
                     for u in session.users:
                         if hasattr(u, 'ws') and u.ws:
                             reason = "EndSession request is accepted." if u.user_id == m.user_id else "Peer sent the end of session."
