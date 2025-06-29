@@ -22,7 +22,7 @@
                             対話ログ一覧
                         </v-toolbar-title>
                         <v-spacer></v-spacer>
-                        <v-btn prepend-icon="mdi-chat" href="chat2.html">チャット画面へ</v-btn>
+                        <v-btn prepend-icon="mdi-download" @click="downloadCSV">CSVダウンロード</v-btn>
                     </v-toolbar>
                     <v-card-text>
                         <v-data-table
@@ -131,6 +131,30 @@ const app = createApp({
         },
         showDetail(event, { item }) {
             window.location.href = `history_detail.html?session_id=${item.session_id}`;
+        },
+        downloadCSV() {
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const headers = this.headers.map(h => h.title).join(',') + '\n';
+            const rows = this.sessions.map(s => {
+                return this.headers.map(h => {
+                    let value = s[h.key];
+                    if (typeof value === 'string') {
+                        return `"${value.replace(/"/g, '""')}"`;
+                    }
+                    return value;
+                }).join(',');
+            }).join('\n');
+
+            const csv = headers + rows;
+            const blob = new Blob([bom, csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `history_log_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
     }
 });

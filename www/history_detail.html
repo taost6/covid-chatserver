@@ -33,6 +33,7 @@
                             対話ログ詳細
                         </v-toolbar-title>
                         <v-spacer></v-spacer>
+                        <v-btn prepend-icon="mdi-download" @click="downloadCSV">CSVダウンロード</v-btn>
                         <v-btn prepend-icon="mdi-arrow-left" @click="goBack">一覧へ戻る</v-btn>
                     </v-toolbar>
                     <v-card-subtitle class="pa-3">
@@ -119,6 +120,31 @@ const app = createApp({
         },
         goBack() {
             window.location.href = 'history.html';
+        },
+        downloadCSV() {
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const headers = ['ID', 'Sender', 'Role', 'Message', 'Created At'].join(',') + '\n';
+            const rows = this.chatHistory.map(log => {
+                const rowData = [
+                    log.id,
+                    log.sender,
+                    log.role,
+                    `"${log.message.replace(/"/g, '""')}"`,
+                    new Date(log.created_at).toLocaleString()
+                ];
+                return rowData.join(',');
+            }).join('\n');
+
+            const csv = headers + rows;
+            const blob = new Blob([bom, csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `session_${this.sessionId}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         },
         getJustify(sender) {
             if (sender === 'User') return 'justify-end';
