@@ -176,18 +176,21 @@ def api(config):
         ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
 
         chat_history = []
+        user_icon = 'mdi-account-tie-woman' if db_session.user_role == '保健師' else 'mdi-account'
+        assistant_icon = 'mdi-account' if db_session.user_role == '保健師' else 'mdi-account-tie-woman'
+
         for log in history_logs:
             if log.sender == 'User':
                 chat_history.append({
                     "sender": "user",
                     "message": log.message,
-                    "icon": 'mdi-account-tie-woman' if log.user_role == '保健師' else 'mdi-account'
+                    "icon": user_icon
                 })
             elif log.sender == 'Assistant':
                 chat_history.append({
                     "sender": "assistant",
                     "message": log.message,
-                    "icon": 'mdi-account' if log.user_role == '保健師' else 'mdi-account-tie-woman'
+                    "icon": assistant_icon
                 })
 
         patient_info = {}

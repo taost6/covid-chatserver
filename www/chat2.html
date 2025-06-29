@@ -139,7 +139,7 @@
 
                 <!-- 患者情報パネル -->
                 <div class="d-flex flex-column" style="height: auto;">
-                    <v-expansion-panels v-if="patientInfo.id && roleNameDraft === '保健師'" style="flex: 1 1 auto; overflow-y: visible;">
+                    <v-expansion-panels v-if="patientInfo.id && roleNameDraft === '保健師'" v-model="patientInfoPanel" style="flex: 1 1 auto; overflow-y: visible;">
                         <v-expansion-panel elevation="2" rounded="lg">
                             <v-expansion-panel-title color="blue-lighten-5">
                                 <v-icon start>mdi-account-box-outline</v-icon>
@@ -332,6 +332,7 @@ const app = createApp({
             patientId: null,
             // patient info
             patientInfo: {},
+            patientInfoPanel: [0],
             interviewDate: null,
             // chat
             chatHistory: [],
