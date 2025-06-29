@@ -252,7 +252,6 @@ def api(config):
                             initial_bot_message = "何でも聞いてください"
                             history.history.append(MessageInfo(role="患者", text=initial_bot_message))
                             await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger)
-                            await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
                         else:
                             logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
                             interview_date_str = datetime.now().strftime("%Y年%m月%d日")
