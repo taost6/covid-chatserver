@@ -431,8 +431,11 @@ const app = createApp({
             this.chatInputDisabled = true;
         },
         async restoreSession() {
+            this.chatInputDisabled = true; // ★ Disable input during restoration
             const sessionInfo = localStorage.getItem('activeSession');
+            console.log("Attempting to restore session from localStorage:", sessionInfo);
             if (!sessionInfo) {
+                this.chatInputDisabled = false; // ★ Enable if no session to restore
                 this.fetchPatientIds();
                 return;
             }
@@ -447,9 +450,9 @@ const app = createApp({
                 const url = `${this.protocol}://${this.host}/v1/session/${sessionId}`;
                 const sessionData = await get_data(url);
 
-                // Restore state
+                // Restore state from sessionData
                 this.sessionId = sessionData.session_id;
-                this.userId = userId; // Use the one from localStorage
+                this.userId = sessionData.user_id; // Use the NEW userId from the server
                 this.userName = sessionData.user_name;
                 this.roleNameDraft = sessionData.user_role;
                 this.roleNameText = sessionData.user_role;
@@ -458,12 +461,15 @@ const app = createApp({
                 this.patientInfo = sessionData.patient_info;
                 this.interviewDate = sessionData.interview_date;
 
+                // Update localStorage with the new userId
+                localStorage.setItem('activeSession', JSON.stringify({ sessionId: this.sessionId, userId: this.userId }));
+
                 // Update UI
                 this.registrationDialog = false;
                 this.roleNameBtnDisabled = true;
                 this.MessageToUser = 'セッションを復元しました。';
                 this.userStatus = 'Established';
-                this.chatInputDisabled = false;
+                // this.chatInputDisabled = false; // Re-enabled in onopen or onmessage
 
                 this.connectWebSocket(true); // Pass a flag to indicate it's a reconnection
 
@@ -472,6 +478,7 @@ const app = createApp({
                 this.MessageToUser = "セッションの復元に失敗しました。新しいセッションを開始してください。";
                 localStorage.removeItem('activeSession');
                 this.fetchPatientIds();
+                this.chatInputDisabled = true; // Keep it disabled
             }
         },
         sessionClosed() {
@@ -537,6 +544,7 @@ const app = createApp({
             this.ws.onopen = () => {
                 if (isReconnection) {
                     this.MessageToUser = '再接続しました。チャットを続けられます。';
+                    this.chatInputDisabled = false; // ★ Enable input after successful reconnection
                 } else {
                     // This message is handled by the onmessage handler now
                 }

@@ -13,5 +13,6 @@ class Session(Base):
     user_role = Column(String, nullable=False)
     patient_id = Column(String, nullable=True)
     status = Column(String, default='active', nullable=False, index=True) # e.g., 'active', 'completed'
+    thread_id = Column(String, nullable=True) # OpenAI Assistant thread_id
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)

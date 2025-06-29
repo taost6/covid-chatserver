@@ -36,13 +36,14 @@ def get_id() -> str:
     base = f"{datetime.now().timestamp()}-{random()}"
     return sha1(base.encode()).hexdigest()
 
-async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger):
+async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False):
     if not modelDatabase.SessionLocal:
         return
     try:
         log_entry = modelDatabase.ChatLog(
             session_id=session_id, user_name=user_name, patient_id=patient_id,
-            user_role=user_role, sender=sender, message=message
+            user_role=user_role, sender=sender, message=message,
+            is_initial_message=is_initial_message
         )
         db.add(log_entry)
         db.commit()
@@ -151,6 +152,7 @@ def api(config):
     @app.get("/v1/session/{session_id}")
     async def get_session_status(session_id: str, db: Session = Depends(get_db)):
         """指定されたセッションが再開可能か確認し、関連情報を返す"""
+        logger.info(f"Attempting to restore session with session_id: {session_id}") # DEBUG LOG
         # Query the new sessions table
         db_session = db.query(SessionModel).filter(
             SessionModel.session_id == session_id,
@@ -169,7 +171,8 @@ def api(config):
 
         history_logs = db.query(modelDatabase.ChatLog).filter(
             modelDatabase.ChatLog.session_id == session_id,
-            modelDatabase.ChatLog.sender != 'System'  # システムログは除外
+            modelDatabase.ChatLog.sender != 'System',  # システムログは除外
+            modelDatabase.ChatLog.is_initial_message == False # 初期メッセージは除外
         ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
 
         chat_history = []
@@ -191,9 +194,21 @@ def api(config):
         if db_session.user_role == '保健師' and db_session.patient_id:
             patient_info = role_provider.get_patient_details(db_session.patient_id)
 
+        # Create a new user_id for the restored session to allow reconnection
+        new_user_id = get_id()
+        restored_user = UserDef(
+            user_id=new_user_id,
+            user_name=db_session.user_name,
+            role=db_session.user_role,
+            status=Status.Registered.name, # Set as Registered to allow WS connection
+            target_patient_id=db_session.patient_id,
+            session_id=session_id # Pass the session_id for reconnection
+        )
+        users_waiting[new_user_id] = restored_user
+
         return {
             "session_id": session_id,
-            "user_id": db_session.user_name, # Simplification
+            "user_id": new_user_id, # Return the NEW user_id
             "user_name": db_session.user_name,
             "user_role": db_session.user_role,
             "patient_id": db_session.patient_id,
@@ -256,7 +271,8 @@ def api(config):
         session_id = str(uuid.uuid4())
         users_waiting[user_id] = UserDef(
             user_id=user_id, user_name=req.user_name, role=req.user_role,
-            status=Status.Registered.name, target_patient_id=req.target_patient_id
+            status=Status.Registered.name, target_patient_id=req.target_patient_id,
+            session_id=session_id
         )
         return RegistrationAccepted(user_id=user_id, session_id=session_id)
 
@@ -272,9 +288,30 @@ def api(config):
         user.status = Status.Prepared.name
 
         try:
+            # Check if this user is reconnecting to an existing session
+            active_session = None
+            for s in users_session.values():
+                for u in s.users:
+                    if isinstance(u, UserDef) and u.user_name == user.user_name and u.role == user.role:
+                        # A simple check, might need to be more robust
+                        active_session = s
+                        break
+                if active_session:
+                    break
+
+            if active_session:
+                # This is a reconnection, update the websocket object
+                for i, u in enumerate(active_session.users):
+                    if isinstance(u, UserDef) and u.user_name == user.user_name:
+                        active_session.users[i].ws = ws
+                        break
+                # No need to send Established again, client already has the history
+                await _session_handler(user, db, logger, oaw)
+                return
+
             peer = _find_peer_human(user)
             if peer:
-                session_id = get_id()
+                session_id = user.session_id or get_id() # Fallback for safety
                 session = APISession(users=[user, peer], history=History(), session_id=session_id)
                 users_session[session_id] = session
                 del users_waiting[user.user_id]
@@ -286,19 +323,41 @@ def api(config):
             else:
                 assistant = _find_peer_ai(user)
                 if assistant:
-                    session_id = get_id()
-                    # Create a new session record in the database
-                    new_session = SessionModel(
-                        session_id=session_id,
-                        user_name=user.user_name,
-                        user_role=user.role,
-                        patient_id=user.target_patient_id if user.role == "保健師" else None,
-                        status='active'
-                    )
-                    db.add(new_session)
-                    db.commit()
+                    session_id = user.session_id
+                    if not session_id:
+                        logger.error(f"Session ID is missing for user {user.user_id}. Cannot establish session.")
+                        await user.ws.close(code=1011, reason="Internal server error: session_id missing")
+                        return
 
-                    assistant.thread_id = await oaw.create_thread()
+                    # Check if session already exists in the database
+                    db_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+
+                    if not db_session:
+                        # Create a new session record in the database only if it doesn't exist
+                        logger.info(f"Creating session record for session_id: {session_id}")
+                        db_session = SessionModel(
+                            session_id=session_id,
+                            user_name=user.user_name,
+                            user_role=user.role,
+                            patient_id=user.target_patient_id if user.role == "保健師" else None,
+                            status='active'
+                        )
+                        db.add(db_session)
+                        db.commit()
+                        db.refresh(db_session)
+
+                    # Reuse or create thread_id
+                    if db_session.thread_id:
+                        assistant.thread_id = db_session.thread_id
+                        logger.info(f"Reusing existing thread_id: {assistant.thread_id}")
+                        prompt_needed = False
+                    else:
+                        assistant.thread_id = await oaw.create_thread()
+                        db_session.thread_id = assistant.thread_id
+                        db.commit()
+                        logger.info(f"Created and saved new thread_id: {assistant.thread_id}")
+                        prompt_needed = True
+
                     history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
                     session = APISession(users=[user, assistant], history=history, session_id=session_id)
                     users_session[session_id] = session
@@ -306,31 +365,37 @@ def api(config):
 
                     if assistant.role == "患者":
                         patient_id_for_ai = user.target_patient_id or "1"
-                        prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                        _, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai) # Get date anyway
                         
-                        if interview_date_str:
+                        if prompt_needed:
+                            prompt_chunks, _ = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                            if interview_date_str:
+                                for chunk in prompt_chunks:
+                                    await oaw.add_message_to_thread(assistant.thread_id, chunk)
+                                    history.history.append(MessageInfo(role="system", text=chunk))
+                                    await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
+                                
+                                initial_bot_message = "何でも聞いてください"
+                                history.history.append(MessageInfo(role="患者", text=initial_bot_message))
+                                await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
+                            else:
+                                logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
+                        
+                        if not interview_date_str:
+                             interview_date_str = datetime.now().strftime("%Y年%m月%d日")
+                    
+                    elif assistant.role == "保健師":
+                        if prompt_needed:
+                            prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks()
                             for chunk in prompt_chunks:
                                 await oaw.add_message_to_thread(assistant.thread_id, chunk)
                                 history.history.append(MessageInfo(role="system", text=chunk))
-                                await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
+                                await log_message(db, session_id, user.user_name, "N/A", user.role, "System", chunk, logger)
                             
-                            initial_bot_message = "何でも聞いてください"
-                            history.history.append(MessageInfo(role="患者", text=initial_bot_message))
-                            await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger)
-                        else:
-                            logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
-                            interview_date_str = datetime.now().strftime("%Y年%m月%d日")
-                    
-                    elif assistant.role == "保健師":
-                        prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks()
-                        for chunk in prompt_chunks:
-                            await oaw.add_message_to_thread(assistant.thread_id, chunk)
-                            history.history.append(MessageInfo(role="system", text=chunk))
-                            await log_message(db, session_id, user.user_name, "N/A", user.role, "System", chunk, logger)
+                            history.history.append(MessageInfo(role="保健師", text=initial_bot_message))
+                            await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger, is_initial_message=True)
+                            await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
                         
-                        history.history.append(MessageInfo(role="保健師", text=initial_bot_message))
-                        await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger)
-                        await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
                         interview_date_str = datetime.now().strftime("%Y年%m月%d日")
 
                     await user.ws.send_json(Established(session_id=session_id, interview_date=interview_date_str).dict())
@@ -360,7 +425,7 @@ def api(config):
 
                 if msg_type == MsgType.MessageSubmitted.name:
                     m = MessageSubmitted.model_validate(data)
-                    await log_message(db, session.session_id, user.user_name, user.target_patient_id, user.role, "User", m.user_msg, logger)
+                    await log_message(db, session.session_id, user.user_name, user.target_patient_id, user.role, "User", m.user_msg, logger, is_initial_message=False)
                     session.history.history.append(MessageInfo(role=user.role, text=m.user_msg))
 
                     for peer in session.users:
@@ -369,10 +434,10 @@ def api(config):
                         if isinstance(peer, AssistantDef) and oaw:
                             response_msg = await oaw.send_message(peer, m.user_msg)
                             session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
-                            await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger)
+                            await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
                             await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
                         elif isinstance(peer, UserDef):
-                            await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger)
+                            await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
 
                 elif msg_type == MsgType.EndSessionRequest.name:
