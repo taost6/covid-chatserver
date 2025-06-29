@@ -117,16 +117,17 @@ class PatientRoleProvider:
         else:
             return onset_date + timedelta(days=2), ""
 
-    def get_patient_prompt_chunks(self, patient_id: str) -> (List[str], str):
+    def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
+        interview_date_strが指定された場合はその日付を、されなければ動的に日付を決定する。
         """
         if self.df is None:
             raise RuntimeError("Provider is not initialized. Call `await provider.initialize()` first.")
 
         column_indices = self._get_column_indices()
         if column_indices.get("ID", -1) == -1:
-            return ["エラー: 'ID'カラムが見つかりません。"]
+            return ["エラー: 'ID'カラムが見つかりません。"], None
 
         try:
             row_list = self.df.values.tolist()
@@ -137,13 +138,22 @@ class PatientRoleProvider:
             return [f"検索中に予期せぬエラーが発生しました: {e}"], None
 
         # 調査日を決定
-        onsetDate_idx = column_indices.get("発症日", -1)
-        onsetDate_str = row[onsetDate_idx] if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]) else None
-        interview_date, time_of_day = self._determine_interview_date(onsetDate_str)
-        
-        weekdays = ["月", "火", "水", "木", "金", "土", "日"]
-        weekday_str = weekdays[interview_date.weekday()]
-        interview_date_str = interview_date.strftime("%Y年%m月%d日") + f"（{weekday_str}曜日）" + time_of_day
+        interview_date = None
+        if not interview_date_str:
+            onsetDate_idx = column_indices.get("発症日", -1)
+            onsetDate_str = row[onsetDate_idx] if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]) else None
+            interview_date, time_of_day = self._determine_interview_date(onsetDate_str)
+            
+            weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+            weekday_str = weekdays[interview_date.weekday()]
+            interview_date_str = interview_date.strftime("%Y年%m月%d日") + f"（{weekday_str}曜日）" + time_of_day
+        else:
+            # 文字列から日付オブジェクトを復元（曜日などの情報は無視）
+            try:
+                interview_date = datetime.strptime(interview_date_str.split('（')[0], "%Y年%m月%d日")
+            except ValueError:
+                # パース失敗の場合は現在の日付をフォールバックとして使用
+                interview_date = datetime.now()
 
         chunks = []
         

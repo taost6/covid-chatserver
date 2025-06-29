@@ -489,6 +489,7 @@ const app = createApp({
             }
             this.ws = null;
             this.sessionInitialized();
+            this.fetchPatientIds(); // ★ Re-fetch patient IDs
         },
         submitRegistrationDialog() {
             if (!this.userName.trim()) {
