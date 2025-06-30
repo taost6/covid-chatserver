@@ -454,6 +454,29 @@ def api(config):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
 
+                elif msg_type == MsgType.DebriefingRequest.name:
+                    m = DebriefingRequest.model_validate(data)
+                    
+                    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+                    
+                    if peer_ai and oaw:
+                        debriefing_prompt = (
+                            "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
+                            "以下の要件に従って、保健師役のユーザーの聞き取りスキルを評価し、フィードバックを生成してください。\n\n"
+                            "評価の要件：\n"
+                            "1. 総合評価を100点満点で採点し、最初に「総合得点：○○点」として示してください。（100点満点）\n"
+                            "2. 感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかを評価してください。\n"
+                            "3. ユーザーが引き出した情報の量を評価してください。\n"
+                            "4. ユーザーの個々の発言について、ミクロな評価を行ってください。評価は「どの発言に対してか（ここは実際の値に置き換える）：記号による評価（◎、○、△、✕）：ユーザーの発言への具体的なアドバイス」の形式で、複数並べてください。\n\n"
+                            "以上の要件をすべて満たした評価レポートを生成してください。"
+                        )
+                        
+                        debriefing_text = await oaw.send_message(peer_ai, debriefing_prompt)
+                        
+                        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=debriefing_text).dict())
+                        
+                        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing: {debriefing_text}", logger)
+
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
                     await _save_history(session.session_id, session.history, logger)

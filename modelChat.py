@@ -75,6 +75,8 @@ class MsgType(Enum):
     Established = 3
     EndSessionRequest = 4
     SessionTerminated = 5
+    DebriefingRequest = 6
+    DebriefingResponse = 7
     MessageSubmitted = 201
     MessageForwarded = 202
     MessageRejected = 203
@@ -155,6 +157,18 @@ class SessionTerminated(BaseModel):
     msg_type: str=MsgType.SessionTerminated.name
     session_id: str
     reason: str
+
+# U > S
+class DebriefingRequest(BaseModel):
+    msg_type: str=MsgType.DebriefingRequest.name
+    session_id: str
+    user_id: str
+
+# S > U
+class DebriefingResponse(BaseModel):
+    msg_type: str=MsgType.DebriefingResponse.name
+    session_id: str
+    debriefing_text: str
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({
