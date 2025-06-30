@@ -21,8 +21,10 @@ def initialize_database(db_url: str):
     engine = create_engine(db_url)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+TABLE_SUFFIX = os.getenv("TABLE_SUFFIX", "")
+
 class ChatLog(Base):
-    __tablename__ = "chat_logs"
+    __tablename__ = f"chat_logs{TABLE_SUFFIX}"
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, index=True)
