@@ -10,7 +10,7 @@ import uuid
 import os
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from random import random, choice
 from hashlib import sha1
 
@@ -40,10 +40,14 @@ async def log_message(db: Session, session_id: str, user_name: str, patient_id: 
     if not modelDatabase.SessionLocal:
         return
     try:
+        # JST (UTC+9) のタイムゾーンを定義
+        jst = timezone(timedelta(hours=9))
+        # ログメッセージが作成された正確な時刻を記録
         log_entry = modelDatabase.ChatLog(
             session_id=session_id, user_name=user_name, patient_id=patient_id,
             user_role=user_role, sender=sender, message=message,
-            is_initial_message=is_initial_message
+            is_initial_message=is_initial_message,
+            created_at=datetime.now(jst)
         )
         db.add(log_entry)
         db.commit()
@@ -383,7 +387,9 @@ def api(config):
                                 history.history.append(MessageInfo(role="system", text=chunk))
                                 await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
                             
-                            initial_bot_message = "何でも聞いてください"
+                            patient_details = role_provider.get_patient_details(patient_id_for_ai)
+                            patient_name = patient_details.get("name", "名無し")
+                            initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
                             history.history.append(MessageInfo(role="患者", text=initial_bot_message))
                             await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
                         elif prompt_needed:
@@ -447,6 +453,29 @@ def api(config):
                         elif isinstance(peer, UserDef):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
+
+                elif msg_type == MsgType.DebriefingRequest.name:
+                    m = DebriefingRequest.model_validate(data)
+                    
+                    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+                    
+                    if peer_ai and oaw:
+                        debriefing_prompt = (
+                            "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
+                            "以下の要件に従って、保健師役のユーザーの聞き取りスキルを評価し、フィードバックを生成してください。\n\n"
+                            "評価の要件：\n"
+                            "1. 総合評価を100点満点で採点し、最初に「総合得点：○○点」として示してください。（100点満点）\n"
+                            "2. 感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかを評価してください。\n"
+                            "3. ユーザーが引き出した情報の量を評価してください。\n"
+                            "4. ユーザーの個々の発言について、ミクロな評価を行ってください。評価は「どの発言に対してか（ここは実際の値に置き換える）：記号による評価（◎、○、△、✕）：ユーザーの発言への具体的なアドバイス」の形式で、複数並べてください。\n\n"
+                            "以上の要件をすべて満たした評価レポートを生成してください。"
+                        )
+                        
+                        debriefing_text = await oaw.send_message(peer_ai, debriefing_prompt)
+                        
+                        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=debriefing_text).dict())
+                        
+                        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing: {debriefing_text}", logger)
 
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)

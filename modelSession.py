@@ -1,11 +1,14 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
+import os
 
 Base = declarative_base()
 
+TABLE_SUFFIX = os.getenv("TABLE_SUFFIX", "")
+
 class Session(Base):
-    __tablename__ = "sessions"
+    __tablename__ = f"sessions{TABLE_SUFFIX}"
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, unique=True, index=True, nullable=False)

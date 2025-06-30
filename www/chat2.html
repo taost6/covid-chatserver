@@ -14,6 +14,8 @@
     <script src="lib/vue/vue.global.js"></script>
     <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
     <script src="lib/vuetify/vuetify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css">
 
     <!-- Material Design Icons -->
     <!--
@@ -240,23 +242,19 @@
                                 {{ roleNameText }}
                             </v-btn>
                         </template>
-                        <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="保健師か患者を選択してください。">
+                        <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="必須項目を入力して開始してください。">
                             <template v-slot:actions>
-                                <div class="w-100 pa-4">
-                                    <v-text-field v-model="userName" label="お名前" required></v-text-field>
-                                    <div class="d-flex flex-col justify-space-evenly">
-                                        <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
-                                            <v-radio label="保健師" value="保健師"></v-radio>
-                                            <v-radio label="患者" value="患者"></v-radio>
-                                        </v-radio-group>
-                                        <div v-if="roleNameDraft == '保健師'" class="flex-grow-5 h-auto d-flex align-center" style="width: 120px">
-                                            <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
-                                        </div>
-                                        <div class="h-auto d-flex align-center">
-                                            <v-btn class="pa-2 elevation-2" @click="submitRegistrationDialog">登録</v-btn>
-                                        </div>
+                                <v-form v-model="formValid" @submit.prevent="submitRegistrationDialog" class="w-100 pa-4">
+                                    <v-text-field v-model="userName" label="お名前" :rules="[rules.required]" required></v-text-field>
+                                    <v-radio-group v-model="roleNameDraft" :rules="[rules.required]" label="あなたのロール">
+                                        <v-radio label="保健師" value="保健師"></v-radio>
+                                        <v-radio label="患者" value="患者"></v-radio>
+                                    </v-radio-group>
+                                    <v-select v-if="roleNameDraft === '保健師'" v-model="patientId" label="担当する患者ID" :items="patientIds" :rules="[rules.required]" required></v-select>
+                                    <div class="d-flex justify-end">
+                                        <v-btn type="submit" class="pa-2 elevation-2" :disabled="!formValid">開始</v-btn>
                                     </div>
-                                </div>
+                                </v-form>
                             </template>
                         </v-card>
                     </v-dialog>
@@ -283,14 +281,38 @@
         
         <!-- 会話終了確認ダイアログ -->
         <v-dialog v-model="confirmEndSessionDialog" max-width="400">
-            <v-card title="会話を終了しますか？">
+            <v-card title="会話を終了しますか？" text="会話を終了し、AIによる評価を表示します。">
                 <v-card-actions>
                     <v-spacer></v-spacer>
-                    <v-btn @click="cancelEndSessionRequest">続ける</v-btn>
-                    <v-btn color="error" @click="submitEndSessionRequest">終了する</v-btn>
+                    <v-btn @click="cancelEndSessionRequest">会話を続ける</v-btn>
+                    <v-btn color="primary" @click="submitDebriefingRequest">評価を表示する</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
+
+        <!-- 評価表示ダイアログ -->
+        <v-dialog v-model="debriefingDialog" persistent max-width="80vw" scrollable>
+            <v-card>
+                <v-toolbar color="primary" density="compact">
+                    <v-toolbar-title>評価レポート</v-toolbar-title>
+                    <v-spacer></v-spacer>
+                    <v-btn icon @click="debriefingDialog = false"><v-icon>mdi-close</v-icon></v-btn>
+                </v-toolbar>
+                <v-card-text class="pa-4">
+                    <div v-html="renderedDebriefingText" class="markdown-body" style="line-height: 1.8;"></div>
+                </v-card-text>
+                <v-divider></v-divider>
+                <v-card-actions class="justify-center pa-4">
+                    <v-btn color="primary" size="large" @click="submitEndSessionRequest">新しいセッションを開始する</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- ローディングオーバーレイ -->
+        <v-overlay v-model="loadingDebriefing" class="align-center justify-center" persistent>
+            <v-progress-circular indeterminate size="64" color="primary"></v-progress-circular>
+            <div class="text-center mt-4">評価を生成しています...</div>
+        </v-overlay>
     </v-app>
 </div>
 
@@ -330,6 +352,10 @@ const app = createApp({
             roleNameDraft: null,
             patientIds: [],
             patientId: null,
+            formValid: false,
+            rules: {
+                required: value => !!value || 'この項目は必須です。',
+            },
             // patient info
             patientInfo: {},
             patientInfoPanel: [0],
@@ -341,10 +367,13 @@ const app = createApp({
             chatInputLock: false,
             chatHitsoryFontSizeNum: 1,
             chatHistoryFontSize: 'text-body-1',
-            confSubmitWithEnter: false,
+            confSubmitWithEnter: true,
             confSubmitThenClear: true,
             // dialogs
             confirmEndSessionDialog: false,
+            debriefingDialog: false,
+            debriefingText: '',
+            loadingDebriefing: false,
         };
     },
     computed: {
@@ -352,6 +381,12 @@ const app = createApp({
             if (this.userStatus === 'Established') return 'success';
             if (this.MessageToUser.includes('失敗') || this.MessageToUser.includes('エラー')) return 'error';
             return 'info';
+        },
+        renderedDebriefingText() {
+            if (window.marked) {
+                return window.marked.parse(this.debriefingText || '');
+            }
+            return this.debriefingText;
         }
     },
     mounted() {
@@ -430,6 +465,9 @@ const app = createApp({
             this.registrationDialog = true;
             this.roleNameBtnDisabled = false;
             this.chatInputDisabled = true;
+            this.debriefingDialog = false;
+            this.debriefingText = '';
+            this.loadingDebriefing = false;
         },
         async restoreSession() {
             this.chatInputDisabled = true; // ★ Disable input during restoration
@@ -493,19 +531,7 @@ const app = createApp({
             this.fetchPatientIds(); // ★ Re-fetch patient IDs
         },
         submitRegistrationDialog() {
-            if (!this.userName.trim()) {
-                this.MessageToUser = "お名前を入力してください。";
-                return;
-            }
-            if (!this.roleNameDraft) {
-                this.MessageToUser = "ロールを選択してください。";
-                return;
-            }
-            if (this.roleNameDraft === '保健師' && !this.patientId) {
-                this.MessageToUser = "保健師の場合は患者IDを選択してください。";
-                return;
-            }
-            
+            // v-formがバリデーションを行うため、ここでのチェックは不要
             this.roleNameText = this.roleNameDraft;
             this.roleNameBtnDisabled = true;
             this.registrationDialog = false;
@@ -579,6 +605,11 @@ const app = createApp({
                         this.MessageToUser = 'セッションが終了しました。';
                         this.sessionClosed();
                         break;
+                    case 'DebriefingResponse':
+                        this.debriefingText = ret.debriefing_text;
+                        this.loadingDebriefing = false;
+                        this.debriefingDialog = true;
+                        break;
                 }
             };
             this.ws.onclose = () => this.sessionClosed();
@@ -613,8 +644,19 @@ const app = createApp({
         cancelEndSessionRequest() {
             this.confirmEndSessionDialog = false;
         },
-        submitEndSessionRequest() {
+        submitDebriefingRequest() {
             this.confirmEndSessionDialog = false;
+            if (this.ws && this.sessionId) {
+                this.loadingDebriefing = true;
+                this.ws.send(JSON.stringify({
+                    msg_type: 'DebriefingRequest',
+                    session_id: this.sessionId,
+                    user_id: this.userId,
+                }));
+            }
+        },
+        submitEndSessionRequest() {
+            this.debriefingDialog = false; // Close debriefing dialog
             if (this.ws && this.sessionId) {
                 this.ws.send(JSON.stringify({
                     msg_type: 'EndSessionRequest',
@@ -623,6 +665,7 @@ const app = createApp({
                 }));
                 localStorage.removeItem('activeSession');
             }
+            // sessionClosed will be called by the onclose event
         },
         async scrollToBottom() {
             await this.$nextTick();
