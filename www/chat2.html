@@ -259,8 +259,13 @@
                         </v-card>
                     </v-dialog>
                 </v-list-item>
-                <v-list-item id="submitEndOfSession" class="mt-2 mr-2" prepend-icon="mdi-file-document-check-outline" variant="outlined">
-                    <v-btn @click="confirmEndSessionDialog = true">会話の終了</v-btn>
+                <!-- 保健師用の終了ボタン -->
+                <v-list-item v-if="roleNameDraft === '保健師'" id="submitEndOfSessionWithDebrief" class="mt-2 mr-2" prepend-icon="mdi-file-document-check-outline" variant="outlined">
+                    <v-btn @click="confirmEndSessionDialog = true">会話の終了と評価</v-btn>
+                </v-list-item>
+                <!-- 患者用の終了ボタン -->
+                <v-list-item v-if="roleNameDraft === '患者'" id="submitEndOfSessionSimple" class="mt-2 mr-2" prepend-icon="mdi-close-circle-outline" variant="outlined">
+                    <v-btn @click="confirmSimpleEndDialog = true">会話の終了</v-btn>
                 </v-list-item>
                 <v-divider thickness="2" color="block" class="my-3"></v-divider>
                 <v-list-item title="文字の大きさ">
@@ -279,13 +284,24 @@
             </v-list>
         </v-navigation-drawer>
         
-        <!-- 会話終了確認ダイアログ -->
+        <!-- 会話終了確認ダイアログ（保健師用） -->
         <v-dialog v-model="confirmEndSessionDialog" max-width="400">
             <v-card title="会話を終了しますか？" text="会話を終了し、AIによる評価を表示します。">
                 <v-card-actions>
                     <v-spacer></v-spacer>
                     <v-btn @click="cancelEndSessionRequest">会話を続ける</v-btn>
                     <v-btn color="primary" @click="submitDebriefingRequest">評価を表示する</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
+        <!-- 会話終了確認ダイアログ（患者用） -->
+        <v-dialog v-model="confirmSimpleEndDialog" max-width="400">
+            <v-card title="会話を終了しますか？">
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn @click="confirmSimpleEndDialog = false">続ける</v-btn>
+                    <v-btn color="error" @click="submitEndSessionRequest">終了する</v-btn>
                 </v-card-actions>
             </v-card>
         </v-dialog>
@@ -371,6 +387,7 @@ const app = createApp({
             confSubmitThenClear: true,
             // dialogs
             confirmEndSessionDialog: false,
+            confirmSimpleEndDialog: false,
             debriefingDialog: false,
             debriefingText: '',
             loadingDebriefing: false,
@@ -656,7 +673,8 @@ const app = createApp({
             }
         },
         submitEndSessionRequest() {
-            this.debriefingDialog = false; // Close debriefing dialog
+            this.confirmSimpleEndDialog = false; // 患者用ダイアログを閉じる
+            this.debriefingDialog = false; // 保健師用評価ダイアログを閉じる
             if (this.ws && this.sessionId) {
                 this.ws.send(JSON.stringify({
                     msg_type: 'EndSessionRequest',
