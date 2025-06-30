@@ -383,7 +383,9 @@ def api(config):
                                 history.history.append(MessageInfo(role="system", text=chunk))
                                 await log_message(db, session_id, user.user_name, patient_id_for_ai, user.role, "System", chunk, logger)
                             
-                            initial_bot_message = "何でも聞いてください"
+                            patient_details = role_provider.get_patient_details(patient_id_for_ai)
+                            patient_name = patient_details.get("name", "名無し")
+                            initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
                             history.history.append(MessageInfo(role="患者", text=initial_bot_message))
                             await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
                         elif prompt_needed:
