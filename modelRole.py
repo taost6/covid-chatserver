@@ -162,7 +162,8 @@ class PatientRoleProvider:
         base_prompt += "以下に示す情報は全て、あなたに関する設定です。\n"
         base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
         base_prompt += "具体的に質問されていることだけに答えてください。\n"
-        base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n\n"
+        base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
+        base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n\n"
 
         base_info = ""
         for column_label, column_index in column_indices.items():
