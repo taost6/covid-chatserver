@@ -163,7 +163,8 @@ class PatientRoleProvider:
         base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
         base_prompt += "具体的に質問されていることだけに答えてください。\n"
         base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
-        base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n\n"
+        base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
+        base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n\n"
 
         base_info = ""
         for column_label, column_index in column_indices.items():
