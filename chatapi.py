@@ -10,7 +10,7 @@ import uuid
 import os
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from random import random, choice
 from hashlib import sha1
 
@@ -40,10 +40,14 @@ async def log_message(db: Session, session_id: str, user_name: str, patient_id: 
     if not modelDatabase.SessionLocal:
         return
     try:
+        # JST (UTC+9) のタイムゾーンを定義
+        jst = timezone(timedelta(hours=9))
+        # ログメッセージが作成された正確な時刻を記録
         log_entry = modelDatabase.ChatLog(
             session_id=session_id, user_name=user_name, patient_id=patient_id,
             user_role=user_role, sender=sender, message=message,
-            is_initial_message=is_initial_message
+            is_initial_message=is_initial_message,
+            created_at=datetime.now(jst)
         )
         db.add(log_entry)
         db.commit()
