@@ -240,23 +240,19 @@
                                 {{ roleNameText }}
                             </v-btn>
                         </template>
-                        <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="保健師か患者を選択してください。">
+                        <v-card prepend-icon="mdi mdi-account-alert" title="ロールの選択" text="必須項目を入力して開始してください。">
                             <template v-slot:actions>
-                                <div class="w-100 pa-4">
-                                    <v-text-field v-model="userName" label="お名前" required></v-text-field>
-                                    <div class="d-flex flex-col justify-space-evenly">
-                                        <v-radio-group v-model="roleNameDraft" class="flex-grow-0">
-                                            <v-radio label="保健師" value="保健師"></v-radio>
-                                            <v-radio label="患者" value="患者"></v-radio>
-                                        </v-radio-group>
-                                        <div v-if="roleNameDraft == '保健師'" class="flex-grow-5 h-auto d-flex align-center" style="width: 120px">
-                                            <v-select v-model="patientId" label="患者ID" :items="patientIds"></v-select>
-                                        </div>
-                                        <div class="h-auto d-flex align-center">
-                                            <v-btn class="pa-2 elevation-2" @click="submitRegistrationDialog">開始</v-btn>
-                                        </div>
+                                <v-form v-model="formValid" @submit.prevent="submitRegistrationDialog" class="w-100 pa-4">
+                                    <v-text-field v-model="userName" label="お名前" :rules="[rules.required]" required></v-text-field>
+                                    <v-radio-group v-model="roleNameDraft" :rules="[rules.required]" label="あなたのロール">
+                                        <v-radio label="保健師" value="保健師"></v-radio>
+                                        <v-radio label="患者" value="患者"></v-radio>
+                                    </v-radio-group>
+                                    <v-select v-if="roleNameDraft === '保健師'" v-model="patientId" label="担当する患者ID" :items="patientIds" :rules="[rules.required]" required></v-select>
+                                    <div class="d-flex justify-end">
+                                        <v-btn type="submit" class="pa-2 elevation-2" :disabled="!formValid">開始</v-btn>
                                     </div>
-                                </div>
+                                </v-form>
                             </template>
                         </v-card>
                     </v-dialog>
@@ -330,6 +326,10 @@ const app = createApp({
             roleNameDraft: null,
             patientIds: [],
             patientId: null,
+            formValid: false,
+            rules: {
+                required: value => !!value || 'この項目は必須です。',
+            },
             // patient info
             patientInfo: {},
             patientInfoPanel: [0],
@@ -493,19 +493,7 @@ const app = createApp({
             this.fetchPatientIds(); // ★ Re-fetch patient IDs
         },
         submitRegistrationDialog() {
-            if (!this.userName.trim()) {
-                this.MessageToUser = "お名前を入力してください。";
-                return;
-            }
-            if (!this.roleNameDraft) {
-                this.MessageToUser = "ロールを選択してください。";
-                return;
-            }
-            if (this.roleNameDraft === '保健師' && !this.patientId) {
-                this.MessageToUser = "保健師の場合は患者IDを選択してください。";
-                return;
-            }
-            
+            // v-formがバリデーションを行うため、ここでのチェックは不要
             this.roleNameText = this.roleNameDraft;
             this.roleNameBtnDisabled = true;
             this.registrationDialog = false;
