@@ -104,9 +104,20 @@ class PatientRoleProvider:
 
     def _determine_interview_date(self, onset_date_str: str) -> (datetime, str):
         """発症日に基づいて調査日と時間帯を確率的に決定する"""
-        try:
-            onset_date = pd.to_datetime(onset_date_str)
-        except (ValueError, TypeError):
+        onset_date = None
+        # pd.to_datetimeはNoneや空文字列に対してNaTを返すことがあるため、事前にチェック
+        if pd.isna(onset_date_str):
+            onset_date = datetime.now()
+        else:
+            try:
+                # 文字列から日付への変換を試みる
+                onset_date = pd.to_datetime(onset_date_str)
+            except (ValueError, TypeError):
+                # 変換に失敗した場合は現在時刻をフォールバックとして使用
+                onset_date = datetime.now()
+        
+        # 変換結果がNaT（Not a Time）の場合も考慮
+        if pd.isna(onset_date):
             onset_date = datetime.now()
 
         rand_val = random.random()
