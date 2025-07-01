@@ -9,6 +9,7 @@
     <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
     <script src="lib/vuetify/vuetify.min.js"></script>
     <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@2.1.0/encoding.min.js"></script>
 </head>
 <body class="bg-grey-lighten-4">
 <div id="app">
@@ -133,11 +134,13 @@ const app = createApp({
             window.location.href = `history_detail.html?session_id=${item.session_id}`;
         },
         downloadCSV() {
-            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
             const headers = this.headers.map(h => h.title).join(',') + '\n';
             const rows = this.sessions.map(s => {
                 return this.headers.map(h => {
                     let value = s[h.key];
+                    if (value === null || value === undefined) {
+                        return '';
+                    }
                     if (typeof value === 'string') {
                         return `"${value.replace(/"/g, '""')}"`;
                     }
@@ -145,8 +148,16 @@ const app = createApp({
                 }).join(',');
             }).join('\n');
 
-            const csv = headers + rows;
-            const blob = new Blob([bom, csv], { type: 'text/csv;charset=utf-8;' });
+            const csvContent = headers + rows;
+            
+            // 文字列をShift_JISのバイト配列に変換
+            const sjisArray = encoding.convert(csvContent, {
+                to: 'SJIS',
+                from: 'UNICODE',
+                type: 'array'
+            });
+
+            const blob = new Blob([new Uint8Array(sjisArray)], { type: 'text/csv;charset=shift_jis;' });
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
             link.setAttribute('href', url);
