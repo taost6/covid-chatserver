@@ -117,6 +117,40 @@ class PatientRoleProvider:
         else:
             return onset_date + timedelta(days=2), ""
 
+    def _split_text_for_prompt(self, text: str, max_length: int) -> List[str]:
+        """指定された最大長に基づいて、キリの良い場所でテキストを分割する。"""
+        if len(text) <= max_length:
+            return [text]
+
+        chunks = []
+        remaining_text = text
+        while len(remaining_text) > 0:
+            if len(remaining_text) <= max_length:
+                chunks.append(remaining_text)
+                break
+
+            substring = remaining_text[:max_length]
+            
+            # 優先度1: 改行文字
+            split_pos = substring.rfind('\n')
+            
+            # 優先度2: 句点
+            if split_pos == -1:
+                split_pos = substring.rfind('。')
+            
+            # 分割点が見つからない、または先頭すぎる場合は強制分割
+            if split_pos == -1 or split_pos < max_length * 0.5: # あまりに短いチャンクになるのを防ぐ
+                split_pos = max_length
+            
+            # 分割点が句点の場合、句点を含める
+            if remaining_text[split_pos] == '。':
+                split_pos += 1
+
+            chunks.append(remaining_text[:split_pos].strip())
+            remaining_text = remaining_text[split_pos:].lstrip()
+
+        return [chunk for chunk in chunks if chunk] # 空のチャンクを除外
+
     def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
@@ -189,7 +223,13 @@ class PatientRoleProvider:
                     date_str = column_label.strftime("%Y-%m-%d")
                     value_str = str(value).strip()
                     if value_str:
-                        chunks.append(f"【{date_str}の行動履歴】\n{value_str}")
+                        header = f"【{date_str}の行動履歴】\n"
+                        # OpenAIのAPI制限を考慮し、安全マージンをとって2000文字程度に
+                        max_chunk_length = 2000
+                        
+                        sub_chunks = self._split_text_for_prompt(value_str, max_chunk_length)
+                        for sub_chunk in sub_chunks:
+                            chunks.append(header + sub_chunk)
 
         # --- 最終チャンク: IDと名前の対応表と指示 ---
         id_name_map = []
