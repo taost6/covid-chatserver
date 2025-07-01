@@ -102,6 +102,46 @@ def _find_user_session(user_id: str) -> APISession:
                 return s
     return None
 
+async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
+    """Debriefing処理を実行し、結果をクライアントに送信する"""
+    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+    
+    if not (peer_ai and oaw):
+        logger.warning("Debriefing requested but no AI peer or OAW found.")
+        return
+
+    # 保健師ロールの場合のみdebriefingを実行
+    if user.role != "保健師":
+        logger.info(f"Debriefing skipped for user role: {user.role}")
+        # 患者ロールの場合は、通常のセッション終了をクライアントに通知して終了
+        await user.ws.send_json(SessionTerminated(session_id=session.session_id, reason="Session ended by user.").dict())
+        await user.ws.close()
+        return
+
+    debriefing_prompt = (
+        "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
+        "以下の要件に従って、保健師役のユーザーの聞き取りスキルを評価し、フィードバックを生成してください。\n\n"
+        "評価の要件：\n"
+        "1. 総合評価を100点満点で採点し、最初に「総合得点：○○点（100点満点）」として示してください。\n"
+        "2. 感染経路の特定や濃厚接触者の把握に繋がる重要な情報（5W1Hなど）を、これまでの会話からどの程度の割合で聴取できたかを評価してください。\n"
+        "3. ユーザーが引き出した情報の量を評価してください。\n"
+        "4. ユーザーの個々の発言について、ミクロな評価を行ってください。評価は「発言時間：記号による評価（◎、○、△、✕）：ユーザーの発言への具体的なアドバイス」の形式で、複数並べてください。\n\n"
+        "以上の要件をすべて満たした評価レポートを生成してください。"
+    )
+    
+    # send_messageは(text, tool_call)のタプルを返すように変更されている
+    debriefing_text, _ = await oaw.send_message(peer_ai, debriefing_prompt)
+    
+    if debriefing_text:
+        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=debriefing_text).dict())
+        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing: {debriefing_text}", logger)
+    else:
+        # 評価テキストの生成に失敗した場合
+        error_message = "評価レポートの生成に失敗しました。"
+        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=error_message).dict())
+        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", "Debriefing failed.", logger)
+
+
 # --- Main API Factory ---
 def api(config):
     logger = config.logger
@@ -446,36 +486,25 @@ def api(config):
                         if peer.user_id == user.user_id: continue
                         
                         if isinstance(peer, AssistantDef) and oaw:
-                            response_msg = await oaw.send_message(peer, m.user_msg)
-                            session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
-                            await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
-                            await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
+                            response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
+                            
+                            if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
+                                # LLMが会話の終了を判断した場合
+                                logger.info(f"Tool call detected: {tool_call.function.name}. Starting debriefing...")
+                                await _execute_debriefing(session, user, db, logger, oaw)
+                            elif response_msg:
+                                # 通常のテキスト応答
+                                session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
+                                await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
+                                await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
                         elif isinstance(peer, UserDef):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
 
                 elif msg_type == MsgType.DebriefingRequest.name:
                     m = DebriefingRequest.model_validate(data)
-                    
-                    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
-                    
-                    if peer_ai and oaw:
-                        debriefing_prompt = (
-                            "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
-                            "以下の要件に従って、保健師役のユーザーの聞き取りスキルを評価し、フィードバックを生成してください。\n\n"
-                            "評価の要件：\n"
-                            "1. 総合評価を100点満点で採点し、最初に「総合得点：○○点」として示してください。（100点満点）\n"
-                            "2. 感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかを評価してください。\n"
-                            "3. ユーザーが引き出した情報の量を評価してください。\n"
-                            "4. ユーザーの個々の発言について、ミクロな評価を行ってください。評価は「どの発言に対してか（ここは実際の値に置き換える）：記号による評価（◎、○、△、✕）：ユーザーの発言への具体的なアドバイス」の形式で、複数並べてください。\n\n"
-                            "以上の要件をすべて満たした評価レポートを生成してください。"
-                        )
-                        
-                        debriefing_text = await oaw.send_message(peer_ai, debriefing_prompt)
-                        
-                        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=debriefing_text).dict())
-                        
-                        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing: {debriefing_text}", logger)
+                    logger.info(f"DebriefingRequest received from user: {m.user_id}")
+                    await _execute_debriefing(session, user, db, logger, oaw)
 
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)

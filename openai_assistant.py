@@ -35,52 +35,62 @@ class OpenAIAssistantWrapper():
     async def send_message(self,
                            assistant: AssistantDef,
                            request_text: str,
-                           ) -> str:
+                           ) -> (Optional[str], Optional[Any]):
+            # ツール（関数）の定義
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "end_conversation_and_start_debriefing",
+                        "description": "ユーザーが会話の終了を望んでいると判断した場合に、会話を終了し、評価フェーズを開始します。",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                        },
+                    },
+                }
+            ]
+
             # ユーザーからのメッセージをスレッドに追加
             await self.add_message_to_thread(assistant.thread_id, request_text)
             
             run = await self.client.beta.threads.runs.create_and_poll(
                 thread_id=assistant.thread_id,
                 assistant_id=assistant.assistant_id,
+                tools=tools,
                 truncation_strategy={
                     "type": "auto",
                     "last_messages": None,
                 },
             )
-            failed_status = [
-                    "requires_action",
-                    "cancelled",
-                    "failed",
-                    "expired",
-                    "incomplete"
-                    ]
-            while True:
-                res = await self.client.beta.threads.runs.retrieve(
+
+            if run.status == 'completed':
+                messages = await self.client.beta.threads.messages.list(
                     thread_id=assistant.thread_id,
-                    run_id=run.id
+                    order="desc",
+                    limit=1
                 )
-                print(res.status)
+                if messages.data and messages.data[0].role == "assistant":
+                    assistant_response = messages.data[0].content[0].text.value
+                    return assistant_response, None
+                else:
+                    return "FAILED: No response from assistant.", None
 
-                if res.status == "completed":
-                    messages = await self.client.beta.threads.messages.list(
-                            thread_id=assistant.thread_id,
-                            order="desc", # 最新のメッセージを先頭に
-                            limit=1
-                            )
-                    # 最新のメッセージがアシスタントからのものであることを確認
-                    if messages.data and messages.data[0].role == "assistant":
-                        assistant_response = messages.data[0].content[0].text.value
-                        print(f"Assistant response: {assistant_response}")
-                        return assistant_response
-                    else:
-                        # 予期せぬ状況（アシスタントの応答がないなど）
-                        print("Assistant response not found or not the latest message.")
-                        return "FAILED: No response from assistant."
+            elif run.status == 'requires_action':
+                # Tool Callingが要求された場合
+                tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                if tool_calls:
+                    # 今回はツール呼び出し自体が目的であり、結果を返す必要はないため、
+                    # 空のtool_outputsを送信してRunを完了させる
+                    await self.client.beta.threads.runs.submit_tool_outputs_and_poll(
+                        thread_id=assistant.thread_id,
+                        run_id=run.id,
+                        tool_outputs=[]
+                    )
+                    return None, tool_calls[0]
+                else:
+                    return "FAILED: Tool call required but no tool_calls found.", None
 
-                elif res.status in failed_status:
-                    messages = await self.client.beta.threads.messages.list(
-                            thread_id=assistant.thread_id)
-                    print(f"Assistant response FAILED: {messages}")
-                    return "FAILED"
-
-                await sleep(1)
+            else: # failed, cancelled, expired
+                print(f"Run failed with status: {run.status}")
+                return "FAILED", None
