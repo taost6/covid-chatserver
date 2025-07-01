@@ -489,9 +489,9 @@ def api(config):
                             response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
                             
                             if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
-                                # LLMが会話の終了を判断した場合
-                                logger.info(f"Tool call detected: {tool_call.function.name}. Starting debriefing...")
-                                await _execute_debriefing(session, user, db, logger, oaw)
+                                # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す
+                                logger.info(f"Tool call detected: {tool_call.function.name}. Notifying client...")
+                                await user.ws.send_json(ToolCallDetected(session_id=session.session_id).dict())
                             elif response_msg:
                                 # 通常のテキスト応答
                                 session.history.history.append(MessageInfo(role=peer.role, text=response_msg))

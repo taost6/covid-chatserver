@@ -80,13 +80,21 @@ class OpenAIAssistantWrapper():
                 # Tool Callingが要求された場合
                 tool_calls = run.required_action.submit_tool_outputs.tool_calls
                 if tool_calls:
-                    # 今回はツール呼び出し自体が目的であり、結果を返す必要はないため、
-                    # 空のtool_outputsを送信してRunを完了させる
+                    tool_outputs = []
+                    for tool_call in tool_calls:
+                        # 各ツールコールに対して、空の成功を示す出力を生成
+                        tool_outputs.append({
+                            "tool_call_id": tool_call.id,
+                            "output": "{\"success\": true}", # JSON形式の文字列として成功レスポンス
+                        })
+                    
+                    # ツール実行結果を送信してRunを継続
                     await self.client.beta.threads.runs.submit_tool_outputs_and_poll(
                         thread_id=assistant.thread_id,
                         run_id=run.id,
-                        tool_outputs=[]
+                        tool_outputs=tool_outputs
                     )
+                    # この関数呼び出しがdebriefingのトリガーなので、tool_callオブジェクトを返す
                     return None, tool_calls[0]
                 else:
                     return "FAILED: Tool call required but no tool_calls found.", None

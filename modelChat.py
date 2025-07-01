@@ -77,6 +77,7 @@ class MsgType(Enum):
     SessionTerminated = 5
     DebriefingRequest = 6
     DebriefingResponse = 7
+    ToolCallDetected = 8
     MessageSubmitted = 201
     MessageForwarded = 202
     MessageRejected = 203
@@ -169,6 +170,11 @@ class DebriefingResponse(BaseModel):
     msg_type: str=MsgType.DebriefingResponse.name
     session_id: str
     debriefing_text: str
+
+# S > U
+class ToolCallDetected(BaseModel):
+    msg_type: str=MsgType.ToolCallDetected.name
+    session_id: str
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({

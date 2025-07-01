@@ -306,6 +306,17 @@
             </v-card>
         </v-dialog>
 
+        <!-- 自動終了検知ダイアログ -->
+        <v-dialog v-model="toolCallConfirmDialog" max-width="450">
+            <v-card title="会話の終了を検知しました" text="このまま評価へ進みますか？">
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn @click="toolCallConfirmDialog = false">会話を続ける</v-btn>
+                    <v-btn color="primary" @click="proceedToDebriefing">評価へ進む</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <!-- 評価表示ダイアログ -->
         <v-dialog v-model="debriefingDialog" persistent max-width="80vw" scrollable>
             <v-card>
@@ -388,6 +399,7 @@ const app = createApp({
             // dialogs
             confirmEndSessionDialog: false,
             confirmSimpleEndDialog: false,
+            toolCallConfirmDialog: false,
             debriefingDialog: false,
             debriefingText: '',
             loadingDebriefing: false,
@@ -485,6 +497,7 @@ const app = createApp({
             this.debriefingDialog = false;
             this.debriefingText = '';
             this.loadingDebriefing = false;
+            this.toolCallConfirmDialog = false;
         },
         async restoreSession() {
             this.chatInputDisabled = true; // ★ Disable input during restoration
@@ -627,6 +640,9 @@ const app = createApp({
                         this.loadingDebriefing = false;
                         this.debriefingDialog = true;
                         break;
+                    case 'ToolCallDetected':
+                        this.toolCallConfirmDialog = true;
+                        break;
                 }
             };
             this.ws.onclose = () => this.sessionClosed();
@@ -660,6 +676,10 @@ const app = createApp({
         },
         cancelEndSessionRequest() {
             this.confirmEndSessionDialog = false;
+        },
+        proceedToDebriefing() {
+            this.toolCallConfirmDialog = false;
+            this.submitDebriefingRequest();
         },
         submitDebriefingRequest() {
             this.confirmEndSessionDialog = false;
