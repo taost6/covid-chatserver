@@ -9,7 +9,7 @@
     <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
     <script src="lib/vuetify/vuetify.min.js"></script>
     <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@2.1.0/encoding.min.js"></script>
+    <script src="lib/encoding/encoding.min.js"></script>
 </head>
 <body class="bg-grey-lighten-4">
 <div id="app">
@@ -58,6 +58,7 @@ async function get_data(url, opt = {}) {
 const { createApp } = Vue;
 const { createVuetify } = Vuetify;
 const vuetify = createVuetify();
+const encoding = window.Encoding;
 
 const app = createApp({
     data() {
@@ -75,6 +76,7 @@ const app = createApp({
             itemsPerPage: 10,
             protocol: null,
             host: null,
+            encoding: encoding,
         };
     },
     mounted() {
@@ -134,7 +136,8 @@ const app = createApp({
             window.location.href = `history_detail.html?session_id=${item.session_id}`;
         },
         downloadCSV() {
-            const headers = this.headers.map(h => h.title).join(',') + '\n';
+            // ヘッダーの各項目をダブルクォーテーションで囲む
+            const headers = this.headers.map(h => `"${h.title}"`).join(',') + '\n';
             const rows = this.sessions.map(s => {
                 return this.headers.map(h => {
                     let value = s[h.key];
@@ -151,7 +154,7 @@ const app = createApp({
             const csvContent = headers + rows;
             
             // 文字列をShift_JISのバイト配列に変換
-            const sjisArray = encoding.convert(csvContent, {
+            const sjisArray = this.encoding.convert(csvContent, {
                 to: 'SJIS',
                 from: 'UNICODE',
                 type: 'array'

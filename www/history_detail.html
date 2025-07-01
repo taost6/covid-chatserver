@@ -8,7 +8,7 @@
     <script src="lib/vue/vue.global.js"></script>
     <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
     <script src="lib/vuetify/vuetify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/encoding-japanese@2.1.0/encoding.min.js"></script>
+    <script src="lib/encoding/encoding.min.js"></script>
     <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
     <style>
         .message-bubble-user {
@@ -79,6 +79,7 @@ async function get_data(url, opt = {}) {
 const { createApp } = Vue;
 const { createVuetify } = Vuetify;
 const vuetify = createVuetify();
+const encoding = window.Encoding;
 
 const app = createApp({
     data() {
@@ -88,6 +89,7 @@ const app = createApp({
             sessionId: '',
             protocol: null,
             host: null,
+            encoding: encoding,
         };
     },
     mounted() {
@@ -123,7 +125,8 @@ const app = createApp({
             window.location.href = 'history.html';
         },
         downloadCSV() {
-            const headers = ['ID', 'Sender', 'Role', 'Message', 'Created At'].join(',') + '\n';
+            // ヘッダーをダブルクォーテーションで囲み、ExcelのSYLK形式誤認識を回避
+            const headers = ['"ID"', '"Sender"', '"Role"', '"Message"', '"Created At"'].join(',') + '\n';
             const rows = this.chatHistory.map(log => {
                 const rowData = [
                     log.id,
@@ -138,7 +141,7 @@ const app = createApp({
             const csvContent = headers + rows;
 
             // 文字列をShift_JISのバイト配列に変換
-            const sjisArray = encoding.convert(csvContent, {
+            const sjisArray = this.encoding.convert(csvContent, {
                 to: 'SJIS',
                 from: 'UNICODE',
                 type: 'array'
