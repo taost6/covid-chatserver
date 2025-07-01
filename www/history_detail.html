@@ -8,6 +8,7 @@
     <script src="lib/vue/vue.global.js"></script>
     <link href="lib/vuetify/vuetify.min.css" rel="stylesheet">
     <script src="lib/vuetify/vuetify.min.js"></script>
+    <script src="lib/encoding/encoding.min.js"></script>
     <link href="lib/MaterialDesign/materialdesignicons.min.css" rel="stylesheet">
     <style>
         .message-bubble-user {
@@ -78,6 +79,7 @@ async function get_data(url, opt = {}) {
 const { createApp } = Vue;
 const { createVuetify } = Vuetify;
 const vuetify = createVuetify();
+const encoding = window.Encoding;
 
 const app = createApp({
     data() {
@@ -87,6 +89,7 @@ const app = createApp({
             sessionId: '',
             protocol: null,
             host: null,
+            encoding: encoding,
         };
     },
     mounted() {
@@ -122,21 +125,29 @@ const app = createApp({
             window.location.href = 'history.html';
         },
         downloadCSV() {
-            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-            const headers = ['ID', 'Sender', 'Role', 'Message', 'Created At'].join(',') + '\n';
+            // ヘッダーをダブルクォーテーションで囲み、ExcelのSYLK形式誤認識を回避
+            const headers = ['"ID"', '"Sender"', '"Role"', '"Message"', '"Created At"'].join(',') + '\n';
             const rows = this.chatHistory.map(log => {
                 const rowData = [
                     log.id,
                     log.sender,
                     log.role,
-                    `"${log.message.replace(/"/g, '""')}"`,
+                    `"${log.message.replace(/"/g, '""').replace(/\n/g, ' ')}"`, // 改行をスペースに置換
                     new Date(log.created_at).toLocaleString()
                 ];
                 return rowData.join(',');
             }).join('\n');
 
-            const csv = headers + rows;
-            const blob = new Blob([bom, csv], { type: 'text/csv;charset=utf-8;' });
+            const csvContent = headers + rows;
+
+            // 文字列をShift_JISのバイト配列に変換
+            const sjisArray = this.encoding.convert(csvContent, {
+                to: 'SJIS',
+                from: 'UNICODE',
+                type: 'array'
+            });
+
+            const blob = new Blob([new Uint8Array(sjisArray)], { type: 'text/csv;charset=shift_jis;' });
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);
             link.setAttribute('href', url);

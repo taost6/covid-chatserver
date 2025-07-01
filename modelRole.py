@@ -104,9 +104,20 @@ class PatientRoleProvider:
 
     def _determine_interview_date(self, onset_date_str: str) -> (datetime, str):
         """発症日に基づいて調査日と時間帯を確率的に決定する"""
-        try:
-            onset_date = pd.to_datetime(onset_date_str)
-        except (ValueError, TypeError):
+        onset_date = None
+        # pd.to_datetimeはNoneや空文字列に対してNaTを返すことがあるため、事前にチェック
+        if pd.isna(onset_date_str):
+            onset_date = datetime.now()
+        else:
+            try:
+                # 文字列から日付への変換を試みる
+                onset_date = pd.to_datetime(onset_date_str)
+            except (ValueError, TypeError):
+                # 変換に失敗した場合は現在時刻をフォールバックとして使用
+                onset_date = datetime.now()
+        
+        # 変換結果がNaT（Not a Time）の場合も考慮
+        if pd.isna(onset_date):
             onset_date = datetime.now()
 
         rand_val = random.random()
@@ -116,6 +127,40 @@ class PatientRoleProvider:
             return onset_date + timedelta(days=1), ""
         else:
             return onset_date + timedelta(days=2), ""
+
+    def _split_text_for_prompt(self, text: str, max_length: int) -> List[str]:
+        """指定された最大長に基づいて、キリの良い場所でテキストを分割する。"""
+        if len(text) <= max_length:
+            return [text]
+
+        chunks = []
+        remaining_text = text
+        while len(remaining_text) > 0:
+            if len(remaining_text) <= max_length:
+                chunks.append(remaining_text)
+                break
+
+            substring = remaining_text[:max_length]
+            
+            # 優先度1: 改行文字
+            split_pos = substring.rfind('\n')
+            
+            # 優先度2: 句点
+            if split_pos == -1:
+                split_pos = substring.rfind('。')
+            
+            # 分割点が見つからない、または先頭すぎる場合は強制分割
+            if split_pos == -1 or split_pos < max_length * 0.5: # あまりに短いチャンクになるのを防ぐ
+                split_pos = max_length
+            
+            # 分割点が句点の場合、句点を含める
+            if remaining_text[split_pos] == '。':
+                split_pos += 1
+
+            chunks.append(remaining_text[:split_pos].strip())
+            remaining_text = remaining_text[split_pos:].lstrip()
+
+        return [chunk for chunk in chunks if chunk] # 空のチャンクを除外
 
     def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None) -> (List[str], str):
         """
@@ -140,9 +185,19 @@ class PatientRoleProvider:
         # 調査日を決定
         interview_date = None
         if not interview_date_str:
+            # 基準日を 発症日 > 感染日 > 固定日 の優先順位で決定
+            base_date_str = None
             onsetDate_idx = column_indices.get("発症日", -1)
-            onsetDate_str = row[onsetDate_idx] if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]) else None
-            interview_date, time_of_day = self._determine_interview_date(onsetDate_str)
+            infectionDate_idx = column_indices.get("感染日", -1)
+
+            if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]):
+                base_date_str = row[onsetDate_idx]
+            elif infectionDate_idx != -1 and pd.notna(row[infectionDate_idx]):
+                base_date_str = row[infectionDate_idx]
+            else:
+                base_date_str = "2022-04-30"
+
+            interview_date, time_of_day = self._determine_interview_date(base_date_str)
             
             weekdays = ["月", "火", "水", "木", "金", "土", "日"]
             weekday_str = weekdays[interview_date.weekday()]
@@ -164,7 +219,8 @@ class PatientRoleProvider:
         base_prompt += "具体的に質問されていることだけに答えてください。\n"
         base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
         base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
-        base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n\n"
+        base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
+        base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
 
         base_info = ""
         for column_label, column_index in column_indices.items():
@@ -189,7 +245,13 @@ class PatientRoleProvider:
                     date_str = column_label.strftime("%Y-%m-%d")
                     value_str = str(value).strip()
                     if value_str:
-                        chunks.append(f"【{date_str}の行動履歴】\n{value_str}")
+                        header = f"【{date_str}の行動履歴】\n"
+                        # OpenAIのAPI制限を考慮し、安全マージンをとって2000文字程度に
+                        max_chunk_length = 2000
+                        
+                        sub_chunks = self._split_text_for_prompt(value_str, max_chunk_length)
+                        for sub_chunk in sub_chunks:
+                            chunks.append(header + sub_chunk)
 
         # --- 最終チャンク: IDと名前の対応表と指示 ---
         id_name_map = []
@@ -270,7 +332,8 @@ class PatientRoleProvider:
             "感染症の発生や拡大を把握・制御するために、患者や関係者から直接情報を収集するプロセスを指します。\n"
             "具体的には、インタビューを通じて、感染経路、接触者、症状の経過、行動履歴（いつ、どこにいったか、誰と会ったかなど）、リスク要因などを詳細に聞き出すことを意味します。\n"
             "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
-            "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
+            "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。\n"
+            "ユーザー（患者）が会話を終了しようとしていると判断した場合、例えば『ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。"
         )
         initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
         

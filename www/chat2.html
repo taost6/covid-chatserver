@@ -83,6 +83,11 @@
             color: #1f2937;
             border: 1px solid #e5e7eb;
         }
+        .message-bubble-system {
+            background-color: #fee2e2 !important;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
         #submitEndOfSession.v-list-item--variant-outlined {
             border: 2px solid #ff0000 !important;
         }
@@ -197,9 +202,9 @@
 
                         <v-card-text id="chat-history-container">
                             <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-2" :class="item.sender === 'user' ? 'justify-end' : 'justify-start'">
-                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'user' ? 'message-bubble-user' : 'message-bubble-patient'">
+                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="{ 'message-bubble-user': item.sender === 'user', 'message-bubble-patient': item.sender === 'assistant', 'message-bubble-system': item.sender === 'system' }">
                                     <div class="d-flex align-start">
-                                        <v-icon class="mr-2 mt-1">{{ item.icon }}</v-icon>
+                                        <v-icon class="mr-2 mt-1" :color="item.sender === 'system' ? 'red-darken-4' : ''">{{ item.icon }}</v-icon>
                                         <div :class="chatHistoryFontSize" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
                                     </div>
                                 </v-sheet>
@@ -306,6 +311,17 @@
             </v-card>
         </v-dialog>
 
+        <!-- 自動終了検知ダイアログ -->
+        <v-dialog v-model="toolCallConfirmDialog" max-width="450">
+            <v-card title="会話の終了を検知しました" text="このまま評価へ進みますか？">
+                <v-card-actions>
+                    <v-spacer></v-spacer>
+                    <v-btn @click="toolCallConfirmDialog = false">会話を続ける</v-btn>
+                    <v-btn color="primary" @click="proceedToDebriefing">評価へ進む</v-btn>
+                </v-card-actions>
+            </v-card>
+        </v-dialog>
+
         <!-- 評価表示ダイアログ -->
         <v-dialog v-model="debriefingDialog" persistent max-width="80vw" scrollable>
             <v-card>
@@ -388,6 +404,7 @@ const app = createApp({
             // dialogs
             confirmEndSessionDialog: false,
             confirmSimpleEndDialog: false,
+            toolCallConfirmDialog: false,
             debriefingDialog: false,
             debriefingText: '',
             loadingDebriefing: false,
@@ -485,6 +502,7 @@ const app = createApp({
             this.debriefingDialog = false;
             this.debriefingText = '';
             this.loadingDebriefing = false;
+            this.toolCallConfirmDialog = false;
         },
         async restoreSession() {
             this.chatInputDisabled = true; // ★ Disable input during restoration
@@ -627,6 +645,18 @@ const app = createApp({
                         this.loadingDebriefing = false;
                         this.debriefingDialog = true;
                         break;
+                    case 'ToolCallDetected':
+                        this.toolCallConfirmDialog = true;
+                        break;
+                    case 'MessageRejected':
+                        this.chatHistory.push({
+                            sender: 'system',
+                            message: `システムエラー: ${ret.reason}`,
+                            icon: 'mdi-alert-circle-outline'
+                        });
+                        this.chatInputLock = false;
+                        this.scrollToBottom();
+                        break;
                 }
             };
             this.ws.onclose = () => this.sessionClosed();
@@ -660,6 +690,10 @@ const app = createApp({
         },
         cancelEndSessionRequest() {
             this.confirmEndSessionDialog = false;
+        },
+        proceedToDebriefing() {
+            this.toolCallConfirmDialog = false;
+            this.submitDebriefingRequest();
         },
         submitDebriefingRequest() {
             this.confirmEndSessionDialog = false;
