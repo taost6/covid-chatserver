@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from modelUserDef import AssistantDef
 from openai import AsyncOpenAI
 from openai_etc import openai_get_apikey
-from typing import Optional
+from typing import Optional, Any
 from asyncio import sleep as sleep
 
 class OpenAIAssistantWrapper():
