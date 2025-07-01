@@ -185,9 +185,19 @@ class PatientRoleProvider:
         # 調査日を決定
         interview_date = None
         if not interview_date_str:
+            # 基準日を 発症日 > 感染日 > 固定日 の優先順位で決定
+            base_date_str = None
             onsetDate_idx = column_indices.get("発症日", -1)
-            onsetDate_str = row[onsetDate_idx] if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]) else None
-            interview_date, time_of_day = self._determine_interview_date(onsetDate_str)
+            infectionDate_idx = column_indices.get("感染日", -1)
+
+            if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]):
+                base_date_str = row[onsetDate_idx]
+            elif infectionDate_idx != -1 and pd.notna(row[infectionDate_idx]):
+                base_date_str = row[infectionDate_idx]
+            else:
+                base_date_str = "2022-04-30"
+
+            interview_date, time_of_day = self._determine_interview_date(base_date_str)
             
             weekdays = ["月", "火", "水", "木", "金", "土", "日"]
             weekday_str = weekdays[interview_date.weekday()]
