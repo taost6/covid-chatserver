@@ -643,6 +643,10 @@ const app = createApp({
                     case 'ToolCallDetected':
                         this.toolCallConfirmDialog = true;
                         break;
+                    case 'MessageRejected':
+                        this.MessageToUser = `エラー: ${ret.reason}`;
+                        this.chatInputLock = false;
+                        break;
                 }
             };
             this.ws.onclose = () => this.sessionClosed();

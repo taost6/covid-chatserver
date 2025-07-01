@@ -101,8 +101,11 @@ class OpenAIAssistantWrapper():
                     return "FAILED: Tool call required but no tool_calls found.", None
 
             else: # failed, cancelled, expired
-                logging.error(f"Run failed with status: {run.status}")
+                error_message = f"Run failed with status: {run.status}"
                 if run.last_error:
+                    error_message += f" - {run.last_error.message}"
                     logging.error(f"Run last_error: {run.last_error}")
+                logging.error(error_message)
                 logging.error(f"Run object: {run}")
-                return "FAILED", None
+                # FAILED: から始まる文字列を返す
+                return f"FAILED: {error_message}", None

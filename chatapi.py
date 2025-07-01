@@ -493,10 +493,15 @@ def api(config):
                                 logger.info(f"Tool call detected: {tool_call.function.name}. Notifying client...")
                                 await user.ws.send_json(ToolCallDetected(session_id=session.session_id).dict())
                             elif response_msg:
-                                # 通常のテキスト応答
-                                session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
-                                await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
-                                await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
+                                if response_msg.startswith("FAILED:"):
+                                    # エラー応答
+                                    logger.error(f"AI response failed: {response_msg}")
+                                    await user.ws.send_json(MessageRejected(session_id=session.session_id, reason=response_msg).dict())
+                                else:
+                                    # 通常のテキスト応答
+                                    session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
+                                    await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
+                                    await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
                         elif isinstance(peer, UserDef):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
