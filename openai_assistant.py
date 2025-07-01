@@ -1,3 +1,4 @@
+import logging
 from pydantic import BaseModel
 from modelUserDef import AssistantDef
 from openai import AsyncOpenAI
@@ -100,5 +101,8 @@ class OpenAIAssistantWrapper():
                     return "FAILED: Tool call required but no tool_calls found.", None
 
             else: # failed, cancelled, expired
-                print(f"Run failed with status: {run.status}")
+                logging.error(f"Run failed with status: {run.status}")
+                if run.last_error:
+                    logging.error(f"Run last_error: {run.last_error}")
+                logging.error(f"Run object: {run}")
                 return "FAILED", None
