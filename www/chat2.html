@@ -83,6 +83,11 @@
             color: #1f2937;
             border: 1px solid #e5e7eb;
         }
+        .message-bubble-system {
+            background-color: #fee2e2 !important;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
         #submitEndOfSession.v-list-item--variant-outlined {
             border: 2px solid #ff0000 !important;
         }
@@ -197,9 +202,9 @@
 
                         <v-card-text id="chat-history-container">
                             <div v-for="(item, index) in chatHistory" :key="index" class="d-flex mb-2" :class="item.sender === 'user' ? 'justify-end' : 'justify-start'">
-                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="item.sender === 'user' ? 'message-bubble-user' : 'message-bubble-patient'">
+                                <v-sheet max-width="70%" class="rounded-lg pa-3" :class="{ 'message-bubble-user': item.sender === 'user', 'message-bubble-patient': item.sender === 'assistant', 'message-bubble-system': item.sender === 'system' }">
                                     <div class="d-flex align-start">
-                                        <v-icon class="mr-2 mt-1">{{ item.icon }}</v-icon>
+                                        <v-icon class="mr-2 mt-1" :color="item.sender === 'system' ? 'red-darken-4' : ''">{{ item.icon }}</v-icon>
                                         <div :class="chatHistoryFontSize" style="white-space: pre-wrap; word-break: break-all;">{{ item.message }}</div>
                                     </div>
                                 </v-sheet>
@@ -644,8 +649,13 @@ const app = createApp({
                         this.toolCallConfirmDialog = true;
                         break;
                     case 'MessageRejected':
-                        this.MessageToUser = `エラー: ${ret.reason}`;
+                        this.chatHistory.push({
+                            sender: 'system',
+                            message: `システムエラー: ${ret.reason}`,
+                            icon: 'mdi-alert-circle-outline'
+                        });
                         this.chatInputLock = false;
+                        this.scrollToBottom();
                         break;
                 }
             };
