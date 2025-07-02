@@ -625,8 +625,12 @@ def api(config):
                     logger.info(f"ContinueConversationRequest received from user: {m.user_id}")
                     peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
                     if peer_ai and oaw:
-                        await oaw.cancel_run(peer_ai.thread_id)
-                        logger.info(f"Run cancelled for thread {peer_ai.thread_id} to continue conversation.")
+                        cancelled = await oaw.cancel_run(peer_ai.thread_id)
+                        if cancelled:
+                            logger.info(f"Run cancelled for thread {peer_ai.thread_id}. Notifying client to continue.")
+                            await user.ws.send_json(ConversationContinueAccepted(session_id=session.session_id).dict())
+                        else:
+                            logger.warning(f"Failed to cancel run for thread {peer_ai.thread_id}. Client might be stuck.")
 
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)

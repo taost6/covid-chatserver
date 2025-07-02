@@ -100,41 +100,8 @@ class OpenAIAssistantWrapper():
                 # Tool Callingが要求された場合
                 tool_calls = run.required_action.submit_tool_outputs.tool_calls
                 if tool_calls:
-                    # tool_choiceが設定されている場合、tool_callをそのまま返す
-                    if tool_choice:
-                        return None, tool_calls[0]
-
-                    # tool_choiceがない場合（通常の会話終了検知）
-                    tool_outputs = []
-                    for tool_call in tool_calls:
-                        # 各ツールコールに対して、空の成功を示す出力を生成
-                        tool_outputs.append({
-                            "tool_call_id": tool_call.id,
-                            "output": "{\"success\": true}", # JSON形式の文字列として成功レスポンス
-                        })
-                    
-                    # ツール実行結果を送信してRunを継続
-                    run_after_submit = await self.client.beta.threads.runs.submit_tool_outputs_and_poll(
-                        thread_id=assistant.thread_id,
-                        run_id=run.id,
-                        tool_outputs=tool_outputs
-                    )
-
-                    # 再帰的にこの関数を呼ぶのではなく、完了後のメッセージを取得する
-                    if run_after_submit.status == 'completed':
-                        messages = await self.client.beta.threads.messages.list(
-                            thread_id=assistant.thread_id,
-                            order="desc",
-                            limit=1
-                        )
-                        if messages.data and messages.data[0].role == "assistant":
-                            assistant_response = messages.data[0].content[0].text.value
-                            return assistant_response, tool_calls[0] # レスポンスとtool_callを両方返す
-                        else:
-                            return "FAILED: No response from assistant after tool call.", None
-                    else:
-                         # tool_callオブジェクトを返す
-                        return None, tool_calls[0]
+                    # 呼び出し元にtool_callを返して判断を仰ぐ
+                    return None, tool_calls[0]
                 else:
                     return "FAILED: Tool call required but no tool_calls found.", None
 

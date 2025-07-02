@@ -727,6 +727,10 @@ const app = createApp({
                     case 'ToolCallDetected':
                         this.toolCallConfirmDialog = true;
                         break;
+                    case 'ConversationContinueAccepted':
+                        this.chatInputLock = false;
+                        this.MessageToUser = '会話を続けられます。';
+                        break;
                     case 'MessageRejected':
                         this.chatHistory.push({
                             sender: 'system',
