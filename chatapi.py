@@ -20,6 +20,7 @@ from modelHistory import *
 from modelRole import PatientRoleProvider
 import modelDatabase
 from modelSession import Session as SessionModel # New
+from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 
 class APISession(BaseModel):
@@ -110,36 +111,93 @@ async def _execute_debriefing(session: APISession, user: UserDef, db: Session, l
         logger.warning("Debriefing requested but no AI peer or OAW found.")
         return
 
-    # 保健師ロールの場合のみdebriefingを実行
+    # 既存のRunをキャンセルする
+    await oaw.cancel_run(peer_ai.thread_id)
+
     if user.role != "保健師":
         logger.info(f"Debriefing skipped for user role: {user.role}")
-        # 患者ロールの場合は、通常のセッション終了をクライアントに通知して終了
         await user.ws.send_json(SessionTerminated(session_id=session.session_id, reason="Session ended by user.").dict())
         await user.ws.close()
         return
 
+    debriefing_tool = {
+        "type": "function",
+        "function": {
+            "name": "submit_debriefing_report",
+            "description": "ユーザー（保健師役）の聞き取りスキルに関する評価レポートを提出します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "overall_score": {
+                        "type": "integer",
+                        "description": "総合評価（100点満点）"
+                    },
+                    "information_retrieval_ratio": {
+                        "type": "string",
+                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの評価。"
+                    },
+                    "information_quality": {
+                        "type": "string",
+                        "description": "患者役が回答した情報の質。どれだけ効率的に有益な情報を引き出せたかの指標。"
+                    },
+                    "micro_evaluations": {
+                        "type": "array",
+                        "description": "ユーザーの個々の発言に対するミクロな評価のリスト。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "utterance": {"type": "string", "description": "評価対象のユーザーの発言"},
+                                "evaluation_symbol": {"type": "string", "enum": ["◎", "○", "△", "✕"], "description": "記号による評価"},
+                                "advice": {"type": "string", "description": "具体的なアドバイス"}
+                            },
+                            "required": ["utterance", "evaluation_symbol", "advice"]
+                        }
+                    },
+                    "overall_comment": {
+                        "type": "string",
+                        "description": "全体的な総評。"
+                    }
+                },
+                "required": ["overall_score", "information_retrieval_ratio", "information_quality", "micro_evaluations", "overall_comment"]
+            }
+        }
+    }
+
+    # 対話履歴をプロンプト用に整形
+    conversation_history = "\n".join([f"{msg.role}: {msg.text}" for msg in session.history.history if msg.role in ["保健師", "患者"]])
     debriefing_prompt = (
         "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
-        "以下の要件に従って、保健師役のユーザーの聞き取りスキルを評価し、フィードバックを生成してください。\n\n"
-        "評価の要件：\n"
-        "1. 総合評価を100点満点で採点し、最初に「総合得点：○○点（100点満点）」として示してください。\n"
-        "2. 感染経路の特定や濃厚接触者の把握に繋がる重要な情報（5W1Hなど）を、これまでの会話からどの程度の割合で聴取できたかを評価してください。\n"
-        "3. ユーザーが引き出した情報の量を評価してください。\n"
-        "4. ユーザーの個々の発言について、ミクロな評価を行ってください。評価は「発言時間：記号による評価（◎、○、△、✕）：ユーザーの発言への具体的なアドバイス」の形式で、複数並べてください。\n\n"
-        "以上の要件をすべて満たした評価レポートを生成してください。"
+        "以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して、聞き取りスキルを評価してください。\n\n"
+        f"【対話履歴】\n{conversation_history}\n\n"
+        "評価の際は、感染経路の特定や濃厚接触者の把握に繋がる重要な情報（いつ・どこで・誰と）が、"
+        "どの程度引き出せているかを厳密に評価してください。"
+        "良かったポイントは積極的に評価し、改善につながるポジティブなフィードバックをお願いします。"
     )
-    
-    # send_messageは(text, tool_call)のタプルを返すように変更されている
-    debriefing_text, _ = await oaw.send_message(peer_ai, debriefing_prompt)
-    
-    if debriefing_text:
-        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=debriefing_text).dict())
-        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing: {debriefing_text}", logger)
+
+    _, tool_call = await oaw.send_message(
+        peer_ai,
+        debriefing_prompt,
+        tools=[debriefing_tool],
+        tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}}
+    )
+
+    debriefing_data = None
+    if tool_call and tool_call.function.name == "submit_debriefing_report":
+        try:
+            args = json.loads(tool_call.function.arguments)
+            debriefing_data = args
+            logger.info("Successfully parsed debriefing report from function calling.")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse debriefing tool call arguments: {e}")
+            logger.error(f"Raw arguments: {tool_call.function.arguments}")
+            debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
     else:
-        # 評価テキストの生成に失敗した場合
-        error_message = "評価レポートの生成に失敗しました。"
-        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_text=error_message).dict())
-        await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", "Debriefing failed.", logger)
+        logger.error(f"Debriefing failed. Expected tool call 'submit_debriefing_report' but got: {tool_call}")
+        debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: AIが評価データを生成できませんでした）"}
+
+    await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
+    # ログにはJSON全体を保存する
+    await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing Data: {json.dumps(debriefing_data, ensure_ascii=False)}", logger)
 
 
 # --- Main API Factory ---
@@ -335,27 +393,47 @@ def api(config):
         user.status = Status.Prepared.name
 
         try:
-            # Check if this user is reconnecting to an existing session
-            active_session = None
-            for s in users_session.values():
-                for u in s.users:
-                    if isinstance(u, UserDef) and u.user_name == user.user_name and u.role == user.role:
-                        # A simple check, might need to be more robust
-                        active_session = s
-                        break
-                if active_session:
-                    break
-
+            # Case 1: Reconnecting to a session active in memory
+            active_session = users_session.get(user.session_id)
             if active_session:
-                # This is a reconnection, update the websocket object
+                logger.info(f"Reconnecting user {user.user_id} to active session {user.session_id}")
+                # Update WebSocket object
                 for i, u in enumerate(active_session.users):
-                    if isinstance(u, UserDef) and u.user_name == user.user_name:
+                    if isinstance(u, UserDef):
                         active_session.users[i].ws = ws
                         break
-                # No need to send Established again, client already has the history
+                # History is already in memory, so just start the handler
                 await _session_handler(user, db, logger, oaw)
                 return
 
+            # Case 2: Restoring a session from DB (e.g., after server restart)
+            db_session = db.query(SessionModel).filter(SessionModel.session_id == user.session_id).first()
+            if db_session and db_session.status == 'active':
+                logger.info(f"No active session in memory for {user.session_id}. Rebuilding from DB.")
+                assistant = _find_peer_ai(user)
+                assistant.thread_id = db_session.thread_id
+                history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
+                active_session = APISession(users=[user, assistant], history=history, session_id=user.session_id)
+                users_session[user.session_id] = active_session
+
+                # Restore history from DB
+                history_logs = db.query(modelDatabase.ChatLog).filter(
+                    modelDatabase.ChatLog.session_id == active_session.session_id,
+                    modelDatabase.ChatLog.sender != 'System'
+                ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
+
+                for log in history_logs:
+                    user_role = user.role
+                    assistant_role = "患者" if user_role == "保健師" else "保健師"
+                    role = user_role if log.sender == 'User' else assistant_role
+                    active_session.history.history.append(MessageInfo(role=role, text=log.message))
+                
+                logger.info(f"Restored {len(history_logs)} messages to server-side session history for session {user.session_id}.")
+                await _session_handler(user, db, logger, oaw)
+                return
+
+            # Case 3: Creating a new session
+            logger.info(f"Creating a new session for user {user.user_id}")
             peer = _find_peer_human(user)
             if peer:
                 session_id = user.session_id or get_id() # Fallback for safety
@@ -486,8 +564,32 @@ def api(config):
                         if peer.user_id == user.user_id: continue
                         
                         if isinstance(peer, AssistantDef) and oaw:
-                            response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
-                            
+                            try:
+                                response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
+                            except NotFoundError:
+                                logger.warning(f"Thread {peer.thread_id} not found. Recreating thread...")
+                                # スレッドを再作成し、DBとセッション情報を更新
+                                new_thread_id = await oaw.create_thread()
+                                peer.thread_id = new_thread_id
+                                db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+                                if db_session:
+                                    db_session.thread_id = new_thread_id
+                                    db.commit()
+                                
+                                # プロンプトを再注入する必要がある
+                                if peer.role == "患者":
+                                    patient_id_for_ai = user.target_patient_id or "1"
+                                    prompt_chunks, _ = role_provider.get_patient_prompt_chunks(patient_id_for_ai, interview_date_str=db_session.interview_date if db_session else None)
+                                    for chunk in prompt_chunks:
+                                        await oaw.add_message_to_thread(peer.thread_id, chunk)
+                                elif peer.role == "保健師":
+                                    prompt_chunks, _ = role_provider.get_interviewer_prompt_chunks()
+                                    for chunk in prompt_chunks:
+                                        await oaw.add_message_to_thread(peer.thread_id, chunk)
+
+                                logger.info(f"Re-sending message to new thread {new_thread_id}")
+                                response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
+
                             if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
                                 # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す
                                 logger.info(f"Tool call detected: {tool_call.function.name}. Notifying client...")

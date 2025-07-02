@@ -169,7 +169,7 @@ class DebriefingRequest(BaseModel):
 class DebriefingResponse(BaseModel):
     msg_type: str=MsgType.DebriefingResponse.name
     session_id: str
-    debriefing_text: str
+    debriefing_data: dict
 
 # S > U
 class ToolCallDetected(BaseModel):
