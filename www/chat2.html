@@ -632,14 +632,17 @@ const app = createApp({
             }
         },
         sessionClosed() {
-            this.MessageToUser = '接続が切れました。再度ロールを選択してください。';
+            // 状態がリセット済み（userStatusがnull）なら、重複実行を防ぐ
+            if (this.userStatus === null) return;
+
+            this.MessageToUser = 'セッションが終了しました。再度ロールを選択してください。';
             if (this.ws) {
-                this.ws.onclose = null;
+                this.ws.onclose = null; // oncloseハンドラの再帰呼び出しを防ぐ
                 this.ws.close();
+                this.ws = null;
             }
-            this.ws = null;
             this.sessionInitialized();
-            this.fetchPatientIds(); // ★ Re-fetch patient IDs
+            this.fetchPatientIds();
         },
         submitRegistrationDialog() {
             // v-formがバリデーションを行うため、ここでのチェックは不要
@@ -795,15 +798,19 @@ const app = createApp({
         submitEndSessionRequest() {
             this.confirmSimpleEndDialog = false; // 患者用ダイアログを閉じる
             this.debriefingDialog = false; // 保健師用評価ダイアログを閉じる
+            
             if (this.ws && this.sessionId) {
                 this.ws.send(JSON.stringify({
                     msg_type: 'EndSessionRequest',
                     session_id: this.sessionId,
                     user_id: this.userId,
                 }));
-                localStorage.removeItem('activeSession');
+                // サーバーからのSessionTerminatedメッセージまたはoncloseイベントでsessionClosedが呼ばれる
+            } else {
+                // WSがない場合でもUIをリセットする
+                this.sessionClosed();
             }
-            // sessionClosed will be called by the onclose event
+            localStorage.removeItem('activeSession');
         },
         async scrollToBottom() {
             await this.$nextTick();
