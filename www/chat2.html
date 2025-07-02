@@ -810,12 +810,10 @@ const app = createApp({
                     session_id: this.sessionId,
                     user_id: this.userId,
                 }));
-                // サーバーからのSessionTerminatedメッセージまたはoncloseイベントでsessionClosedが呼ばれる
-            } else {
-                // WSがない場合でもUIをリセットする
-                this.sessionClosed();
             }
             localStorage.removeItem('activeSession');
+            // サーバーからの応答を待たずに、即座にUIをリセットする
+            this.sessionClosed();
         },
         async scrollToBottom() {
             await this.$nextTick();
