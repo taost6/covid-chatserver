@@ -134,11 +134,11 @@ async def _execute_debriefing(session: APISession, user: UserDef, db: Session, l
                     },
                     "information_retrieval_ratio": {
                         "type": "string",
-                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの詳細な評価。"
+                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの評価。詳細なフィードバックをお願いします。"
                     },
                     "information_quality": {
                         "type": "string",
-                        "description": "患者役が回答した情報の質。どれだけ効率的に有益な情報を引き出せたかの詳細な指標。"
+                        "description": "患者役が回答した情報の質。どれだけ効率的に情報を引き出せたかの指標。詳細なフィードバックをお願いします。"
                     },
                     "micro_evaluations": {
                         "type": "array",
