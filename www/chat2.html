@@ -316,7 +316,7 @@
             <v-card title="会話の終了を検知しました" text="このまま評価へ進みますか？">
                 <v-card-actions>
                     <v-spacer></v-spacer>
-                    <v-btn @click="toolCallConfirmDialog = false">会話を続ける</v-btn>
+                    <v-btn @click="continueConversation">会話を続ける</v-btn>
                     <v-btn color="primary" @click="proceedToDebriefing">評価へ進む</v-btn>
                 </v-card-actions>
             </v-card>
@@ -770,6 +770,16 @@ const app = createApp({
         proceedToDebriefing() {
             this.toolCallConfirmDialog = false;
             this.submitDebriefingRequest();
+        },
+        continueConversation() {
+            this.toolCallConfirmDialog = false;
+            if (this.ws && this.sessionId) {
+                this.ws.send(JSON.stringify({
+                    msg_type: 'ContinueConversationRequest',
+                    session_id: this.sessionId,
+                    user_id: this.userId,
+                }));
+            }
         },
         submitDebriefingRequest() {
             this.confirmEndSessionDialog = false;

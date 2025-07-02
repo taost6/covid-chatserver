@@ -620,6 +620,14 @@ def api(config):
                     logger.info(f"DebriefingRequest received from user: {m.user_id}")
                     await _execute_debriefing(session, user, db, logger, oaw)
 
+                elif msg_type == MsgType.ContinueConversationRequest.name:
+                    m = ContinueConversationRequest.model_validate(data)
+                    logger.info(f"ContinueConversationRequest received from user: {m.user_id}")
+                    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+                    if peer_ai and oaw:
+                        await oaw.cancel_run(peer_ai.thread_id)
+                        logger.info(f"Run cancelled for thread {peer_ai.thread_id} to continue conversation.")
+
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
                     await _save_history(session.session_id, session.history, logger)
