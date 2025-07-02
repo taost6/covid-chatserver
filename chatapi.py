@@ -565,7 +565,14 @@ def api(config):
                         
                         if isinstance(peer, AssistantDef) and oaw:
                             try:
-                                response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
+                                # ロールに応じてFunction Callingを制御
+                                tools_param = None # デフォルト（保健師ロール）
+                                if user.role == "患者":
+                                    tools_param = [] # 患者ロールの場合は無効化
+
+                                response_msg, tool_call = await oaw.send_message(
+                                    peer, m.user_msg, tools=tools_param
+                                )
                             except NotFoundError:
                                 logger.warning(f"Thread {peer.thread_id} not found. Recreating thread...")
                                 # スレッドを再作成し、DBとセッション情報を更新
