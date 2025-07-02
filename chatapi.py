@@ -134,11 +134,11 @@ async def _execute_debriefing(session: APISession, user: UserDef, db: Session, l
                     },
                     "information_retrieval_ratio": {
                         "type": "string",
-                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの評価。"
+                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの詳細な評価。"
                     },
                     "information_quality": {
                         "type": "string",
-                        "description": "患者役が回答した情報の質。どれだけ効率的に有益な情報を引き出せたかの指標。"
+                        "description": "患者役が回答した情報の質。どれだけ効率的に有益な情報を引き出せたかの詳細な指標。"
                     },
                     "micro_evaluations": {
                         "type": "array",
@@ -170,7 +170,7 @@ async def _execute_debriefing(session: APISession, user: UserDef, db: Session, l
         "以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して、聞き取りスキルを評価してください。\n\n"
         f"【対話履歴】\n{conversation_history}\n\n"
         "評価の際は、感染経路の特定や濃厚接触者の把握に繋がる重要な情報（いつ・どこで・誰と）が、"
-        "どの程度引き出せているかを厳密に評価してください。"
+        "どの程度引き出せているかを厳密かつ詳細に評価してください。"
         "良かったポイントは積極的に評価し、改善につながるポジティブなフィードバックをお願いします。"
     )
 
