@@ -78,6 +78,8 @@ class MsgType(Enum):
     DebriefingRequest = 6
     DebriefingResponse = 7
     ToolCallDetected = 8
+    ContinueConversationRequest = 9
+    ConversationContinueAccepted = 10
     MessageSubmitted = 201
     MessageForwarded = 202
     MessageRejected = 203
@@ -169,11 +171,22 @@ class DebriefingRequest(BaseModel):
 class DebriefingResponse(BaseModel):
     msg_type: str=MsgType.DebriefingResponse.name
     session_id: str
-    debriefing_text: str
+    debriefing_data: dict
 
 # S > U
 class ToolCallDetected(BaseModel):
     msg_type: str=MsgType.ToolCallDetected.name
+    session_id: str
+
+# U > S
+class ContinueConversationRequest(BaseModel):
+    msg_type: str=MsgType.ContinueConversationRequest.name
+    session_id: str
+    user_id: str
+
+# S > U
+class ConversationContinueAccepted(BaseModel):
+    msg_type: str=MsgType.ConversationContinueAccepted.name
     session_id: str
 
 if __name__ == "__main__":
