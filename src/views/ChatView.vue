@@ -123,11 +123,11 @@ const debriefingData = ref<DebriefingData | null>(null);
 const connectionLoadingTitle = computed(() => {
   const userRole = sessionStore.userRole;
   if (userRole === '保健師') {
-    return '患者AIとの接続を準備中...';
+    return '患者との接続を準備中...';
   } else if (userRole === 'patient') {
-    return '保健師AIとの接続を準備中...';
+    return '保健師との接続を準備中...';
   }
-  return 'AIとの接続を準備中...';
+  return '保健師との接続を準備中...';
 });
 
 // WebSocket composable
@@ -347,6 +347,9 @@ const restoreSession = async () => {
     // Reconnect WebSocket
     sessionStore.setConnecting(true);
     await connect(sessionData.user_id, true);
+    
+    // Stop loading indicator after successful restoration
+    sessionStore.setConnecting(false);
     
     // Close drawer since session is established
     drawer.value = false;

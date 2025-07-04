@@ -49,10 +49,14 @@ export function useWebSocket(options: WebSocketOptions = {}) {
         isConnecting.value = false;
         sessionStore.setConnection(ws, true);
         
-        if (isReconnection && options.onMessage) {
-          options.onMessage({
-            msg_type: 'Reconnected',
-          });
+        // For reconnections, stop loading state immediately since session is already established
+        if (isReconnection) {
+          sessionStore.setConnecting(false);
+          if (options.onMessage) {
+            options.onMessage({
+              msg_type: 'Reconnected',
+            });
+          }
         }
         
         resolve();
