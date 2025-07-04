@@ -86,10 +86,6 @@
       </v-card-actions>
     </v-card>
   </v-dialog>
-  <v-overlay v-model="isLoading" class="align-center justify-center" persistent>
-    <v-progress-circular indeterminate size="64" color="primary"></v-progress-circular>
-    <div class="text-center mt-4">評価を生成しています...</div>
-  </v-overlay>
 </template>
 
 <script setup>
@@ -97,11 +93,7 @@ import { computed } from 'vue';
 
 const props = defineProps({
   modelValue: Boolean,
-  debriefingData: Object,
-  loading: {
-    type: Boolean,
-    default: false
-  }
+  debriefingData: Object
 });
 
 const emit = defineEmits(['update:modelValue', 'start-new-session']);
@@ -110,8 +102,6 @@ const localDialog = computed({
   get: () => props.modelValue,
   set: (value) => emit('update:modelValue', value)
 });
-
-const isLoading = computed(() => props.loading);
 
 const evaluationSymbolColor = (symbol) => {
     switch (symbol) {

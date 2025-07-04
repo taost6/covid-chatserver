@@ -59,8 +59,20 @@
     <DebriefingDialog 
       v-model="debriefingDialog" 
       :debriefing-data="debriefingData" 
-      :loading="loadingDebriefing"
       @start-new-session="submitEndSessionRequest"
+    />
+
+    <!-- Loading Overlays -->
+    <LoadingOverlay 
+      v-model="sessionStore.isConnecting"
+      :title="connectionLoadingTitle"
+      subtitle="少々お待ちください"
+    />
+    
+    <LoadingOverlay 
+      v-model="sessionStore.isLoadingDebriefing"
+      title="評価を生成しています..."
+      subtitle="会話内容を分析中です"
     />
   </v-app>
 </template>
@@ -83,6 +95,7 @@ import MessageInput from '@/components/layout/MessageInput.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
 import ChatWindow from '@/components/features/ChatWindow.vue';
 import DebriefingDialog from '@/components/features/DebriefingDialog.vue';
+import LoadingOverlay from '@/components/shared/LoadingOverlay.vue';
 
 // Stores
 const sessionStore = useSessionStore();
@@ -105,7 +118,17 @@ const confirmSimpleEndDialog = ref(false);
 const toolCallConfirmDialog = ref(false);
 const debriefingDialog = ref(false);
 const debriefingData = ref<DebriefingData | null>(null);
-const loadingDebriefing = ref(false);
+
+// Computed properties
+const connectionLoadingTitle = computed(() => {
+  const userRole = sessionStore.userRole;
+  if (userRole === '保健師') {
+    return '患者AIとの接続を準備中...';
+  } else if (userRole === 'patient') {
+    return '保健師AIとの接続を準備中...';
+  }
+  return 'AIとの接続を準備中...';
+});
 
 // WebSocket composable
 const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, sendEndSession } = useWebSocket({
@@ -122,6 +145,7 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
   },
   onEstablished: (data) => {
     console.log('Session established:', data);
+    sessionStore.setConnecting(false); // Stop loading indicator
     sessionStore.saveToLocalStorage();
     // セッション確立時にフォーカス
     setTimeout(() => {
@@ -133,7 +157,7 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
   },
   onDebriefingResponse: (data) => {
     debriefingData.value = data;
-    loadingDebriefing.value = false;
+    sessionStore.setLoadingDebriefing(false); // Stop loading indicator
     debriefingDialog.value = true;
   },
   onToolCallDetected: () => {
@@ -172,13 +196,20 @@ const handleRegistrationSuccess = async (data: { userId: string; sessionId: stri
       patientStore.setSelectedPatientId(data.patientId);
     }
     
+    // Start loading indicator
+    sessionStore.setConnecting(true);
+    
     // Connect WebSocket
     await connect(data.userId);
+    
+    // Stop loading indicator (will be stopped in onEstablished callback)
+    // sessionStore.setConnecting(false);
     
     // Close drawer after successful registration
     drawer.value = false;
   } catch (error) {
     console.error('Registration success handler failed:', error);
+    sessionStore.setConnecting(false);
   }
 };
 
@@ -188,7 +219,6 @@ const sessionInitialized = () => {
   patientStore.reset();
   debriefingDialog.value = false;
   debriefingData.value = null;
-  loadingDebriefing.value = false;
   toolCallConfirmDialog.value = false;
 };
 
@@ -205,7 +235,15 @@ const cancelEndSessionRequest = () => {
 
 const proceedToDebriefing = () => {
   toolCallConfirmDialog.value = false;
-  submitDebriefingRequestHandler();
+  drawer.value = false; // サイドバーを隠す
+  sessionStore.setLoadingDebriefing(true);
+  
+  try {
+    sendDebriefingRequest();
+  } catch (error) {
+    console.error('Failed to request debriefing:', error);
+    sessionStore.setLoadingDebriefing(false);
+  }
 };
 
 const continueConversation = () => {
@@ -220,13 +258,13 @@ const continueConversation = () => {
 const submitDebriefingRequestHandler = () => {
   confirmEndSessionDialog.value = false;
   drawer.value = false; // サイドバーを隠す
-  loadingDebriefing.value = true;
+  sessionStore.setLoadingDebriefing(true);
   
   try {
     sendDebriefingRequest();
   } catch (error) {
     console.error('Failed to request debriefing:', error);
-    loadingDebriefing.value = false;
+    sessionStore.setLoadingDebriefing(false);
   }
 };
 
@@ -307,6 +345,7 @@ const restoreSession = async () => {
     chatStore.setInputDisabled(false);
     
     // Reconnect WebSocket
+    sessionStore.setConnecting(true);
     await connect(sessionData.user_id, true);
     
     // Close drawer since session is established
@@ -315,6 +354,7 @@ const restoreSession = async () => {
     console.log('Session restored successfully');
   } catch (error) {
     console.error('Session restoration failed:', error);
+    sessionStore.setConnecting(false);
     localStorage.removeItem('activeSession');
     sessionStore.clearSession();
   }

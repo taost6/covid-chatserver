@@ -7,6 +7,8 @@ interface SessionState {
   isConnected: boolean;
   ws: WebSocket | null;
   interviewDate: string | null;
+  isConnecting: boolean;
+  isLoadingDebriefing: boolean;
 }
 
 export const useSessionStore = defineStore('session', {
@@ -16,6 +18,8 @@ export const useSessionStore = defineStore('session', {
     isConnected: false,
     ws: null,
     interviewDate: null,
+    isConnecting: false,
+    isLoadingDebriefing: false,
   }),
 
   getters: {
@@ -62,6 +66,14 @@ export const useSessionStore = defineStore('session', {
       this.interviewDate = date;
     },
 
+    setConnecting(connecting: boolean) {
+      this.isConnecting = connecting;
+    },
+
+    setLoadingDebriefing(loading: boolean) {
+      this.isLoadingDebriefing = loading;
+    },
+
     saveToLocalStorage() {
       if (this.sessionId && this.userId) {
         const sessionInfo: SessionInfo = {
@@ -90,6 +102,8 @@ export const useSessionStore = defineStore('session', {
       this.isConnected = false;
       this.ws = null;
       this.interviewDate = null;
+      this.isConnecting = false;
+      this.isLoadingDebriefing = false;
       localStorage.removeItem('activeSession');
     },
 
