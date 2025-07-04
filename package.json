@@ -27,7 +27,6 @@
     "@types/node": "^24.0.10",
     "connect-history-api-fallback": "^2.0.0",
     "typescript": "^5.8.3",
-    "vite": "^7.0.0",
     "vue-tsc": "^3.0.1"
   },
   "dependencies": {
@@ -35,6 +34,7 @@
     "@vitejs/plugin-vue": "^6.0.0",
     "encoding-japanese": "^2.2.0",
     "pinia": "^3.0.3",
+    "vite": "^7.0.0",
     "vue": "^3.5.17",
     "vue-router": "^4.5.1",
     "vuetify": "^3.8.12"
