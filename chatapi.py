@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Body, Request, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from typing import List, Union
@@ -659,5 +659,23 @@ def api(config):
             if session.session_id in users_session:
                 del users_session[session.session_id]
 
-    app.mount("/", StaticFiles(directory=config.www_path, html=True), name="www")
+    # SPA fallback: serve index.html for non-API routes
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        # Skip API routes
+        if full_path.startswith("v1/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Try to serve the requested file
+        file_path = f"dist/{full_path}"
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        
+        # For everything else (SPA routes), serve index.html
+        if os.path.exists("dist/index.html"):
+            return FileResponse("dist/index.html")
+        
+        raise HTTPException(status_code=404, detail="File not found")
+
+    app.mount("/", StaticFiles(directory="dist", html=True), name="dist")
     return app
