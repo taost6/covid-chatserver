@@ -22,13 +22,6 @@
     "url": "https://github.com/taost6/covid-chatserver/issues"
   },
   "homepage": "https://github.com/taost6/covid-chatserver#readme",
-  "devDependencies": {
-    "@types/encoding-japanese": "^2.2.1",
-    "@types/node": "^24.0.10",
-    "connect-history-api-fallback": "^2.0.0",
-    "typescript": "^5.8.3",
-    "vue-tsc": "^3.0.1"
-  },
   "dependencies": {
     "@mdi/font": "^7.4.47",
     "@vitejs/plugin-vue": "^6.0.0",
@@ -38,5 +31,12 @@
     "vue": "^3.5.17",
     "vue-router": "^4.5.1",
     "vuetify": "^3.8.12"
+  },
+  "devDependencies": {
+    "@types/encoding-japanese": "^2.2.1",
+    "@types/node": "^24.0.10",
+    "connect-history-api-fallback": "^2.0.0",
+    "typescript": "^5.8.3",
+    "vue-tsc": "^3.0.1"
   }
 }
