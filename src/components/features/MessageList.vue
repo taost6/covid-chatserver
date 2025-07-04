@@ -104,17 +104,21 @@ const getIconColor = (sender: string, message?: string) => {
 };
 
 const isErrorMessage = (message: string) => {
-  const errorKeywords = [
-    'エラー', 'error', 'Error', 'ERROR',
-    '失敗', 'failed', 'Failed', 'FAILED',
-    '問題', 'problem', 'Problem',
-    '接続できません', 'connection', 'timeout',
-    'システムエラー'
+  // より厳密なエラー判定：システムエラーメッセージの特徴的なパターンのみ判定
+  const errorPatterns = [
+    /システムエラー/i,
+    /エラーが発生/i,
+    /接続できません/i,
+    /^エラー:/i,
+    /^Error:/i,
+    /失敗しました/i,
+    /タイムアウト/i,
+    /timeout/i,
+    /connection.*error/i,
+    /処理に失敗/i
   ];
   
-  return errorKeywords.some(keyword => 
-    message.toLowerCase().includes(keyword.toLowerCase())
-  );
+  return errorPatterns.some(pattern => pattern.test(message));
 };
 
 const getTimestampColor = (sender: string) => {

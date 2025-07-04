@@ -80,7 +80,7 @@ const downloadCSV = async () => {
 // Format messages for MessageList component
 const formattedMessages = computed(() => {
   return historyStore.currentSession.map(item => ({
-    sender: item.sender,
+    sender: item.sender.toLowerCase() === 'system' ? 'system' : item.sender.toLowerCase(),
     message: item.message,
     icon: getIcon(item.sender, item.role),
     created_at: item.created_at
@@ -92,6 +92,12 @@ const getIcon = (sender: string, role: string) => {
     return role === '保健師' ? 'mdi-account-tie-woman' : 'mdi-account';
   } else if (sender === 'Assistant') {
     return role === '患者' ? 'mdi-account' : 'mdi-account-tie-woman';
+  } else if (sender === 'System') {
+    // システムメッセージのアイコンを役割に応じて設定
+    if (role === '評価者') {
+      return 'mdi-file-chart';
+    }
+    return 'mdi-information-outline';
   }
   return 'mdi-robot';
 };

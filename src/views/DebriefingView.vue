@@ -192,10 +192,18 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useSessionStore } from '@/stores/sessionStore';
+import { useChatStore } from '@/stores/chatStore';
+import { usePatientStore } from '@/stores/patientStore';
 import type { DebriefingData } from '@/types';
 
 const route = useRoute();
 const router = useRouter();
+
+// Stores
+const sessionStore = useSessionStore();
+const chatStore = useChatStore();
+const patientStore = usePatientStore();
 
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -257,8 +265,15 @@ const goToChat = () => {
 };
 
 const startNewSession = () => {
-  // Clear any stored session data
+  // Clear all session data
   localStorage.removeItem('activeSession');
+  
+  // Reset all stores to initial state
+  sessionStore.reset();
+  chatStore.reset();
+  patientStore.reset();
+  
+  // Navigate to home page
   router.push('/');
 };
 
