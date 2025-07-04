@@ -9,6 +9,7 @@ interface SessionState {
   interviewDate: string | null;
   isConnecting: boolean;
   isLoadingDebriefing: boolean;
+  debriefingExists: boolean;
 }
 
 export const useSessionStore = defineStore('session', {
@@ -20,6 +21,7 @@ export const useSessionStore = defineStore('session', {
     interviewDate: null,
     isConnecting: false,
     isLoadingDebriefing: false,
+    debriefingExists: false,
   }),
 
   getters: {
@@ -74,6 +76,10 @@ export const useSessionStore = defineStore('session', {
       this.isLoadingDebriefing = loading;
     },
 
+    setDebriefingExists(exists: boolean) {
+      this.debriefingExists = exists;
+    },
+
     saveToLocalStorage() {
       if (this.sessionId && this.userId) {
         const sessionInfo: SessionInfo = {
@@ -104,6 +110,7 @@ export const useSessionStore = defineStore('session', {
       this.interviewDate = null;
       this.isConnecting = false;
       this.isLoadingDebriefing = false;
+      this.debriefingExists = false;
       localStorage.removeItem('activeSession');
     },
 

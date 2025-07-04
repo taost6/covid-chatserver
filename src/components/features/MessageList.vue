@@ -19,7 +19,7 @@
           >
             {{ message.icon }}
           </v-icon>
-          <div :class="fontSizeClass" class="message-text">{{ message.message }}</div>
+          <div :class="fontSizeClass" class="message-text" v-html="processMessage(message.message)"></div>
         </div>
         <div 
           v-if="showTimestamp"
@@ -35,7 +35,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 
 interface Message {
   sender: string;
@@ -53,6 +54,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   showTimestamp: false
 });
+
+const router = useRouter();
 
 const fontSizeClass = computed(() => {
   const fontSize = parseInt(localStorage.getItem('chatFontSize') || '1');
@@ -123,6 +126,37 @@ const formatTimestamp = (timestamp: string) => {
   if (!timestamp) return '';
   return new Date(timestamp).toLocaleString();
 };
+
+// Process message to handle markdown links and sanitize HTML
+const processMessage = (message: string) => {
+  // Escape HTML first
+  const escaped = message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  
+  // Convert markdown-style links [text](url) to HTML links
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const processed = escaped.replace(linkRegex, (match, text, url) => {
+    // Handle internal routes
+    if (url.startsWith('/')) {
+      return `<a href="#" onclick="handleInternalLink('${url}'); return false;" class="system-link">${text}</a>`;
+    }
+    // Handle external links
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="system-link">${text}</a>`;
+  });
+  
+  return processed;
+};
+
+// Setup global link handler on mount
+onMounted(() => {
+  (window as any).handleInternalLink = (url: string) => {
+    router.push(url);
+  };
+});
 </script>
 
 <style scoped>
@@ -161,5 +195,17 @@ const formatTimestamp = (timestamp: string) => {
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+}
+
+.message-text :deep(.system-link) {
+  color: #1976d2;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.message-text :deep(.system-link:hover) {
+  color: #1565c0;
+  text-decoration: none;
 }
 </style>

@@ -103,23 +103,52 @@ def _find_user_session(user_id: str) -> APISession:
                 return s
     return None
 
-async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
-    """Debriefing処理を実行し、結果をクライアントに送信する"""
-    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+async def _execute_debriefing_with_specialist(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
+    """Debriefing専用Assistantを使用してクリーンな環境で評価を実行する"""
     
-    if not (peer_ai and oaw):
-        logger.warning("Debriefing requested but no AI peer or OAW found.")
-        return
-
-    # 既存のRunをキャンセルする
-    await oaw.cancel_run(peer_ai.thread_id)
-
     if user.role != "保健師":
         logger.info(f"Debriefing skipped for user role: {user.role}")
         await user.ws.send_json(SessionTerminated(session_id=session.session_id, reason="Session ended by user.").dict())
         await user.ws.close()
         return
 
+    # Debriefing専用AssistantのIDを取得
+    try:
+        with open("assistants.json", "r") as f:
+            assistants = json.load(f)
+        if len(assistants) < 3:
+            logger.error("Debriefing specialist assistant ID not found in assistants.json")
+            debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価専用AIが設定されていません）"}
+            await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
+            return
+            
+        debriefing_assistant_id = assistants[2]  # 3番目のAssistant ID
+        logger.info(f"Using debriefing specialist assistant: {debriefing_assistant_id}")
+    except Exception as e:
+        logger.error(f"Failed to load debriefing assistant ID: {e}")
+        debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 設定ファイルの読み込みエラー）"}
+        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
+        return
+
+    # 新しいスレッドを作成してクリーンな環境を準備
+    try:
+        debriefing_thread_id = await oaw.create_thread()
+        logger.info(f"Created debriefing thread: {debriefing_thread_id}")
+    except Exception as e:
+        logger.error(f"Failed to create debriefing thread: {e}")
+        debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価環境の準備エラー）"}
+        await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
+        return
+
+    # Debriefing専用のAssistant定義を作成
+    debriefing_assistant = AssistantDef(
+        user_id=get_id(),
+        role="評価者",
+        assistant_id=debriefing_assistant_id,
+        thread_id=debriefing_thread_id
+    )
+
+    # Function Calling用のツール定義
     debriefing_tool = {
         "type": "function",
         "function": {
@@ -163,41 +192,78 @@ async def _execute_debriefing(session: APISession, user: UserDef, db: Session, l
         }
     }
 
-    # 対話履歴をプロンプト用に整形
-    conversation_history = "\n".join([f"{msg.role}: {msg.text}" for msg in session.history.history if msg.role in ["保健師", "患者"]])
+    # 対話履歴を整形
+    conversation_history = "\n".join([
+        f"{msg.role}: {msg.text}" 
+        for msg in session.history.history 
+        if msg.role in ["保健師", "患者"]
+    ])
+    
+    # Debriefing専用プロンプト
     debriefing_prompt = (
-        "あなたは、これまでのユーザー（保健師役）との対話を評価する専門家です。"
-        "以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して、聞き取りスキルを評価してください。\n\n"
+        "あなたは保健師の聞き取りスキルを評価する専門家です。"
+        "以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。\n\n"
         f"【対話履歴】\n{conversation_history}\n\n"
-        "評価の際は、感染経路の特定や濃厚接触者の把握に繋がる重要な情報（いつ・どこで・誰と）が、"
-        "どの程度引き出せているかを厳密かつ詳細に評価してください。"
+        "評価の観点：\n"
+        "1. 感染経路の特定に関する情報収集の網羅性\n"
+        "2. 濃厚接触者の把握につながる質問の適切性\n"
+        "3. 時系列（いつ）、場所（どこで）、人物（誰と）の情報収集\n"
+        "4. 質問技法の効果性と患者への配慮\n"
+        "5. 情報の整理と確認の適切性\n\n"
+        "必ず`submit_debriefing_report`関数を呼び出して評価を提出してください。"
         "良かったポイントは積極的に評価し、改善につながるポジティブなフィードバックをお願いします。"
     )
 
-    _, tool_call = await oaw.send_message(
-        peer_ai,
-        debriefing_prompt,
-        tools=[debriefing_tool],
-        tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}}
-    )
+    try:
+        # 評価を実行
+        _, tool_call = await oaw.send_message(
+            debriefing_assistant,
+            debriefing_prompt,
+            tools=[debriefing_tool],
+            tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}}
+        )
 
-    debriefing_data = None
-    if tool_call and tool_call.function.name == "submit_debriefing_report":
+        debriefing_data = None
+        if tool_call and tool_call.function.name == "submit_debriefing_report":
+            try:
+                args = json.loads(tool_call.function.arguments)
+                debriefing_data = args
+                logger.info("Successfully parsed debriefing report from specialist assistant.")
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Failed to parse debriefing tool call arguments: {e}")
+                logger.error(f"Raw arguments: {tool_call.function.arguments}")
+                debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
+        else:
+            logger.error(f"Debriefing failed. Expected tool call 'submit_debriefing_report' but got: {tool_call}")
+            debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: AIが評価データを生成できませんでした）"}
+
+    except Exception as e:
+        logger.error(f"Error during debriefing execution: {e}")
+        debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 処理中にエラーが発生しました）"}
+
+    finally:
+        # スレッドを削除してリソースを解放
         try:
-            args = json.loads(tool_call.function.arguments)
-            debriefing_data = args
-            logger.info("Successfully parsed debriefing report from function calling.")
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Failed to parse debriefing tool call arguments: {e}")
-            logger.error(f"Raw arguments: {tool_call.function.arguments}")
-            debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
-    else:
-        logger.error(f"Debriefing failed. Expected tool call 'submit_debriefing_report' but got: {tool_call}")
-        debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: AIが評価データを生成できませんでした）"}
+            await oaw.delete_thread(debriefing_thread_id)
+            logger.info(f"Deleted debriefing thread: {debriefing_thread_id}")
+        except Exception as e:
+            logger.warning(f"Failed to delete debriefing thread {debriefing_thread_id}: {e}")
 
+    # 結果をクライアントに送信
     await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
-    # ログにはJSON全体を保存する
-    await log_message(db, session.session_id, "System", peer_ai.assistant_id, peer_ai.role, "System", f"Debriefing Data: {json.dumps(debriefing_data, ensure_ascii=False)}", logger)
+    
+    # ログに保存
+    await log_message(db, session.session_id, "System", debriefing_assistant_id, "評価者", "System", f"Debriefing Data: {json.dumps(debriefing_data, ensure_ascii=False)}", logger)
+    
+    # チャットログにシステムメッセージとして評価レポートへのリンクを追加
+    debriefing_link_message = f" 評価レポートが完成しました。[レポートを表示](/debriefing/{session.session_id})"
+    await log_message(db, session.session_id, user.user_name, debriefing_assistant_id, "評価者", "System", debriefing_link_message, logger)
+
+
+async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
+    """Debriefing処理を実行し、結果をクライアントに送信する"""
+    # 新しい専用Assistantを使用したDebriefing処理に移行
+    await _execute_debriefing_with_specialist(session, user, db, logger, oaw)
 
 
 # --- Main API Factory ---
@@ -299,6 +365,31 @@ def api(config):
         if db_session.user_role == '保健師' and db_session.patient_id:
             patient_info = role_provider.get_patient_details(db_session.patient_id)
 
+        # Check if debriefing report exists for this session
+        debriefing_exists = False
+        if db_session.user_role == '保健師':
+            debriefing_log = db.query(modelDatabase.ChatLog).filter(
+                modelDatabase.ChatLog.session_id == session_id,
+                modelDatabase.ChatLog.sender == "System",
+                modelDatabase.ChatLog.message.like("Debriefing Data:%")
+            ).first()
+            
+            if debriefing_log:
+                debriefing_exists = True
+                # Add system message to chat history if debriefing report exists
+                debriefing_link_message = f" 評価レポートが完成しました。[レポートを表示](/debriefing/{session_id})"
+                # Check if this message already exists in history
+                existing_link = any(
+                    msg.get("sender") == "system" and "評価レポートが完成しました" in msg.get("message", "")
+                    for msg in chat_history
+                )
+                if not existing_link:
+                    chat_history.append({
+                        "sender": "system",
+                        "message": debriefing_link_message,
+                        "icon": "mdi-file-chart"
+                    })
+
         # Create a new user_id for the restored session to allow reconnection
         new_user_id = get_id()
         restored_user = UserDef(
@@ -320,6 +411,7 @@ def api(config):
             "chat_history": chat_history,
             "patient_info": patient_info,
             "interview_date": db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日"),
+            "debriefing_exists": debriefing_exists,
         }
 
     @app.get("/v1/logs")
@@ -366,6 +458,33 @@ def api(config):
                 "created_at": log.created_at.isoformat()
             } for log in logs
         ]
+
+    @app.get("/v1/session/{session_id}/debriefing")
+    async def get_debriefing_data(session_id: str, db: Session = Depends(get_db)):
+        """特定のセッションのデブリーフィングデータを取得する"""
+        if not modelDatabase.SessionLocal:
+            raise HTTPException(status_code=503, detail="Database is not initialized.")
+            
+        # Debriefingデータはsender='System'でmessageに'Debriefing Data:'で始まるJSONとして保存されている
+        debriefing_log = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id,
+            modelDatabase.ChatLog.sender == "System",
+            modelDatabase.ChatLog.message.like("Debriefing Data:%")
+        ).order_by(
+            modelDatabase.ChatLog.created_at.desc()
+        ).first()
+        
+        if not debriefing_log:
+            raise HTTPException(status_code=404, detail="Debriefing data not found for this session")
+        
+        try:
+            # "Debriefing Data: " プレフィックスを削除してJSONを解析
+            debriefing_json = debriefing_log.message.replace("Debriefing Data: ", "", 1)
+            debriefing_data = json.loads(debriefing_json)
+            return debriefing_data
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse debriefing data for session {session_id}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to parse debriefing data")
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):

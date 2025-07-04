@@ -19,6 +19,12 @@ const router = createRouter({
       component: () => import('@/views/HistoryDetailView.vue'),
       props: true,
     },
+    {
+      path: '/debriefing/:sessionId?',
+      name: 'debriefing',
+      component: () => import('@/views/DebriefingView.vue'),
+      props: true,
+    },
   ],
 });
 

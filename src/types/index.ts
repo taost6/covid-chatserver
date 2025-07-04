@@ -1,6 +1,6 @@
 // チャット関連の型定義
 export interface MessageInfo {
-  role: '保健師' | '患者' | 'system';
+  role: '保健師' | '患者' | '評価者' | 'system';
   text: string;
 }
 
@@ -11,7 +11,7 @@ export interface ChatMessage {
 }
 
 // ユーザー関連の型定義
-export type UserRole = '保健師' | '患者';
+export type UserRole = '保健師' | '患者' | '評価者';
 export type UserStatus = 'Initial' | 'Registered' | 'Prepared' | 'Established';
 
 export interface User {

@@ -55,12 +55,6 @@
       </v-card>
     </v-dialog>
     
-    <!-- Debriefing Dialog -->
-    <DebriefingDialog 
-      v-model="debriefingDialog" 
-      :debriefing-data="debriefingData" 
-      @start-new-session="submitEndSessionRequest"
-    />
 
     <!-- Loading Overlays -->
     <LoadingOverlay 
@@ -79,6 +73,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { usePatientStore } from '@/stores/patientStore';
@@ -94,8 +89,10 @@ import NavigationDrawer from '@/components/layout/NavigationDrawer.vue';
 import MessageInput from '@/components/layout/MessageInput.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
 import ChatWindow from '@/components/features/ChatWindow.vue';
-import DebriefingDialog from '@/components/features/DebriefingDialog.vue';
 import LoadingOverlay from '@/components/shared/LoadingOverlay.vue';
+
+// Router
+const router = useRouter();
 
 // Stores
 const sessionStore = useSessionStore();
@@ -116,7 +113,6 @@ const drawer = ref(false);
 const confirmEndSessionDialog = ref(false);
 const confirmSimpleEndDialog = ref(false);
 const toolCallConfirmDialog = ref(false);
-const debriefingDialog = ref(false);
 const debriefingData = ref<DebriefingData | null>(null);
 
 // Computed properties
@@ -158,7 +154,16 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
   onDebriefingResponse: (data) => {
     debriefingData.value = data;
     sessionStore.setLoadingDebriefing(false); // Stop loading indicator
-    debriefingDialog.value = true;
+    sessionStore.setDebriefingExists(true); // Mark debriefing as completed
+    
+    // Redirect to debriefing page instead of showing modal
+    router.push({
+      name: 'debriefing',
+      params: {
+        sessionId: sessionStore.sessionId || 'current',
+        data: JSON.stringify(data)
+      }
+    });
   },
   onToolCallDetected: () => {
     toolCallConfirmDialog.value = true;
@@ -195,6 +200,9 @@ const handleRegistrationSuccess = async (data: { userId: string; sessionId: stri
     if (data.userRole === '保健師' && data.patientId) {
       patientStore.setSelectedPatientId(data.patientId);
     }
+
+    // Set debriefing exists status (default to false for new sessions)
+    sessionStore.setDebriefingExists(false);
     
     // Start loading indicator
     sessionStore.setConnecting(true);
@@ -217,7 +225,6 @@ const sessionInitialized = () => {
   sessionStore.reset();
   chatStore.reset();
   patientStore.reset();
-  debriefingDialog.value = false;
   debriefingData.value = null;
   toolCallConfirmDialog.value = false;
 };
@@ -234,6 +241,20 @@ const cancelEndSessionRequest = () => {
 };
 
 const proceedToDebriefing = () => {
+  // Check if debriefing already exists
+  if (sessionStore.debriefingExists) {
+    console.warn('Debriefing already exists for this session');
+    toolCallConfirmDialog.value = false;
+    // Redirect to existing debriefing page
+    router.push({
+      name: 'debriefing',
+      params: {
+        sessionId: sessionStore.sessionId || 'current'
+      }
+    });
+    return;
+  }
+
   toolCallConfirmDialog.value = false;
   drawer.value = false; // サイドバーを隠す
   sessionStore.setLoadingDebriefing(true);
@@ -256,6 +277,20 @@ const continueConversation = () => {
 };
 
 const submitDebriefingRequestHandler = () => {
+  // Check if debriefing already exists
+  if (sessionStore.debriefingExists) {
+    console.warn('Debriefing already exists for this session');
+    confirmEndSessionDialog.value = false;
+    // Redirect to existing debriefing page
+    router.push({
+      name: 'debriefing',
+      params: {
+        sessionId: sessionStore.sessionId || 'current'
+      }
+    });
+    return;
+  }
+
   confirmEndSessionDialog.value = false;
   drawer.value = false; // サイドバーを隠す
   sessionStore.setLoadingDebriefing(true);
@@ -270,7 +305,6 @@ const submitDebriefingRequestHandler = () => {
 
 const submitEndSessionRequest = () => {
   confirmSimpleEndDialog.value = false;
-  debriefingDialog.value = false;
   
   try {
     sendEndSession();
@@ -315,6 +349,11 @@ const restoreSession = async () => {
     
     if (sessionData.interview_date) {
       sessionStore.setInterviewDate(sessionData.interview_date);
+    }
+
+    // Set debriefing exists status from restored session
+    if (sessionData.debriefing_exists !== undefined) {
+      sessionStore.setDebriefingExists(sessionData.debriefing_exists);
     }
     
     // Update localStorage with new user_id
