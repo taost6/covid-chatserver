@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 
 interface Message {
@@ -57,9 +57,10 @@ const props = withDefaults(defineProps<Props>(), {
 
 const router = useRouter();
 
+const fontSize = ref(1);
+
 const fontSizeClass = computed(() => {
-  const fontSize = parseInt(localStorage.getItem('chatFontSize') || '1');
-  switch (fontSize) {
+  switch (fontSize.value) {
     case 0: return 'text-caption';
     case 1: return 'text-body-1';
     case 2: return 'text-h6';
@@ -155,11 +156,25 @@ const processMessage = (message: string) => {
   return processed;
 };
 
-// Setup global link handler on mount
+// Setup global link handler on mount and load font size
 onMounted(() => {
   (window as any).handleInternalLink = (url: string) => {
     router.push(url);
   };
+  
+  // Load font size from localStorage
+  const savedFontSize = localStorage.getItem('chatFontSize');
+  if (savedFontSize) {
+    fontSize.value = parseInt(savedFontSize, 10);
+  }
+  
+  // Listen for font size changes
+  window.addEventListener('fontSizeChanged', () => {
+    const newFontSize = localStorage.getItem('chatFontSize');
+    if (newFontSize) {
+      fontSize.value = parseInt(newFontSize, 10);
+    }
+  });
 });
 </script>
 

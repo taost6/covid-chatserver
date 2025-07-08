@@ -201,6 +201,8 @@ const handleRegistration = async () => {
 
 const changeFontSize = () => {
   localStorage.setItem('chatFontSize', fontSize.value.toString());
+  // Trigger event to notify other components
+  window.dispatchEvent(new Event('fontSizeChanged'));
 };
 
 const scrollToBottom = async () => {
