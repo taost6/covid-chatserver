@@ -126,7 +126,7 @@
                       :style="{ borderLeft: `4px solid ${getEvaluationColorHex(item.evaluation_symbol)}` }"
                     >
                       <v-card-text>
-                        <blockquote :class="[fontSizeClass, 'font-italic mb-3 pa-3 bg-surface-variant rounded']">
+                        <blockquote :class="[fontSizeClass, 'font-italic mb-3 pa-3 bg-surface-variant rounded']" style="border-left: none;">
                           "{{ item.utterance }}"
                         </blockquote>
                         <p :class="[fontSizeClass, 'mb-0']">{{ item.advice }}</p>
