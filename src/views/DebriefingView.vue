@@ -3,37 +3,11 @@
     <v-main style="flex: 1 1 auto; overflow: auto;">
       <v-container fluid class="pa-md-6 pa-4">
         <!-- Header -->
-        <v-row class="mb-6">
-          <v-col>
-            <div class="d-flex align-center">
-              <v-btn 
-                icon="mdi-arrow-left" 
-                variant="text" 
-                size="large"
-                @click="goToChat"
-                class="mr-3 no-print"
-              ></v-btn>
-              <div>
-                <h1 class="text-h4 font-weight-bold text-primary">評価レポート</h1>
-                <p class="text-body-1 text-medium-emphasis mt-1">積極的疫学調査 聞き取りスキル評価</p>
-              </div>
-              <v-spacer></v-spacer>
-              <v-btn 
-                v-if="debriefingData"
-                icon="mdi-printer" 
-                variant="outlined"
-                size="large"
-                @click="printReport"
-                class="mr-2 no-print"
-              >
-                <v-icon>mdi-printer</v-icon>
-                <v-tooltip activator="parent" location="bottom">
-                  印刷
-                </v-tooltip>
-              </v-btn>
-            </div>
-          </v-col>
-        </v-row>
+        <AppHeader 
+          :custom-status="'調査評価レポート'"
+          @toggle-drawer="drawer = !drawer" 
+        />
+        
 
         <!-- Loading State -->
         <div v-if="loading" class="text-center py-12">
@@ -83,10 +57,13 @@
             </v-card-text>
           </v-card>
 
+          <!-- Patient Info Panel -->
+          <PatientInfoPanel :show-staff-info="true" />
+
           <!-- Evaluation Details -->
-          <v-card class="mb-6" elevation="2">
+          <v-card class="mb-6 mt-6" elevation="2">
             <v-card-title class="text-h5 font-weight-bold bg-surface-variant">
-              詳細評価
+              講評
             </v-card-title>
             <v-card-text class="pa-6">
               <v-row>
@@ -186,6 +163,9 @@
         </div>
       </v-container>
     </v-footer>
+
+    <!-- Navigation Drawer -->
+    <DebriefingDrawer v-model="drawer" />
   </v-app>
 </template>
 
@@ -195,7 +175,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { usePatientStore } from '@/stores/patientStore';
-import type { DebriefingData } from '@/types';
+import AppHeader from '@/components/layout/AppHeader.vue';
+import DebriefingDrawer from '@/components/layout/DebriefingDrawer.vue';
+import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
+import type { DebriefingData, PatientInfo } from '@/types';
 
 const route = useRoute();
 const router = useRouter();
@@ -208,6 +191,7 @@ const patientStore = usePatientStore();
 const loading = ref(true);
 const error = ref<string | null>(null);
 const debriefingData = ref<DebriefingData | null>(null);
+const drawer = ref(false);
 
 // Get evaluation color based on symbol
 const getEvaluationColor = (symbol: string) => {
@@ -248,6 +232,9 @@ const loadDebriefingData = async () => {
       
       const data = await response.json();
       debriefingData.value = data;
+      
+      // Also try to load session data for patient info
+      await loadSessionDataFromApi(sessionId);
     } else {
       throw new Error('セッションIDまたは評価データが指定されていません');
     }
@@ -259,10 +246,56 @@ const loadDebriefingData = async () => {
   }
 };
 
-// Navigation handlers
-const goToChat = () => {
-  router.push('/');
+// Load session data from API using session ID
+const loadSessionDataFromApi = async (sessionId: string) => {
+  try {
+    console.log('[DebriefingView] Loading session data for session ID:', sessionId);
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/session/${sessionId}`;
+    
+    const response = await fetch(url);
+    if (response.ok) {
+      const sessionData = await response.json();
+      console.log('[DebriefingView] Session data loaded from API:', sessionData);
+      
+      // Create mock user for evaluation page display
+      const user = {
+        userId: sessionData.user_id || 'unknown',
+        sessionId: sessionData.session_id || sessionId,
+        userName: sessionData.user_name || 'Unknown User',
+        role: sessionData.user_role || '保健師',
+        status: 'Established' as const,
+        targetPatientId: sessionData.patient_id || null,
+      };
+      
+      console.log('[DebriefingView] Setting user for evaluation page:', user);
+      sessionStore.setUser(user);
+      sessionStore.setSessionId(sessionData.session_id || sessionId);
+      // Don't set connection status to avoid interfering with active sessions
+      
+      if (sessionData.interview_date) {
+        sessionStore.setInterviewDate(sessionData.interview_date);
+      }
+      
+      // Set patient info
+      if (sessionData.patient_info) {
+        console.log('[DebriefingView] Setting patient info from API:', sessionData.patient_info);
+        patientStore.setPatientInfo(sessionData.patient_info);
+        patientStore.setSelectedPatientId(sessionData.patient_id);
+      } else if (sessionData.patient_id) {
+        console.log('[DebriefingView] Setting patient ID from API:', sessionData.patient_id);
+        patientStore.setSelectedPatientId(sessionData.patient_id);
+      }
+    } else {
+      console.error('[DebriefingView] Failed to load session data from API:', response.status);
+    }
+  } catch (error) {
+    console.error('[DebriefingView] Error loading session data from API:', error);
+  }
 };
+
+
 
 const startNewSession = () => {
   // Clear all session data
@@ -277,13 +310,47 @@ const startNewSession = () => {
   router.push('/');
 };
 
-const printReport = () => {
-  window.print();
+
+
+// Session restoration for patient info display (evaluation page only)
+const restoreSessionInfo = async () => {
+  console.log('[DebriefingView] Restoring session info...');
+  console.log('[DebriefingView] Current session state:', {
+    user: sessionStore.user,
+    isEstablished: sessionStore.isEstablished,
+    userRole: sessionStore.userRole,
+    targetPatientId: sessionStore.targetPatientId,
+    patient: patientStore.patient,
+    hasPatientInfo: patientStore.hasPatientInfo
+  });
+  
+  // If stores already have user and patient data, no need to restore
+  if (sessionStore.user && patientStore.hasPatientInfo) {
+    console.log('[DebriefingView] Session already has user and patient info');
+    return;
+  }
+  
+  // Try to restore from localStorage (without affecting active session state)
+  const savedSession = localStorage.getItem('activeSession');
+  if (savedSession) {
+    try {
+      const { sessionId } = JSON.parse(savedSession);
+      console.log('[DebriefingView] Found saved session ID:', sessionId);
+      
+      if (sessionId) {
+        await loadSessionDataFromApi(sessionId);
+      }
+    } catch (error) {
+      console.error('[DebriefingView] Failed to restore session info:', error);
+    }
+  } else {
+    console.log('[DebriefingView] No saved session found');
+  }
 };
 
-
 // Initialize
-onMounted(() => {
+onMounted(async () => {
+  await restoreSessionInfo();
   loadDebriefingData();
 });
 </script>

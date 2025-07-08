@@ -13,6 +13,14 @@
         <v-expansion-panel-text>
           <v-list density="compact">
             <v-list-item 
+              v-if="showStaffInfo && sessionStore.userName" 
+              class="bg-blue-lighten-5 rounded-lg mb-3 pa-3"
+            >
+              <div class="font-weight-bold text-blue-darken-4 mb-2">担当者</div>
+              <div>{{ sessionStore.userName }}</div>
+            </v-list-item>
+            
+            <v-list-item 
               v-if="sessionStore.interviewDate" 
               class="bg-yellow-lighten-5 rounded-lg mb-3 pa-3"
             >
@@ -66,12 +74,25 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { usePatientStore } from '@/stores/patientStore';
 import { api } from '@/utils/api';
 
+interface Props {
+  showStaffInfo?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  showStaffInfo: false,
+});
+
 const sessionStore = useSessionStore();
 const patientStore = usePatientStore();
 
 const panelState = ref<number | undefined>(undefined);
 
 const showPanel = computed(() => {
+  // For debriefing page with staff info, show panel if we have user or patient info
+  if (props.showStaffInfo) {
+    return sessionStore.user || patientStore.hasPatientInfo;
+  }
+  // For regular chat page, require established session
   return sessionStore.userRole === '保健師' && sessionStore.isEstablished;
 });
 
@@ -111,7 +132,7 @@ watch(
 );
 
 onMounted(() => {
-  // Initialize panel state - could be expanded by default
+  // Initialize panel state - expanded by default, especially for debriefing page
   panelState.value = 0;
 });
 </script>

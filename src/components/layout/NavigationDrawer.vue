@@ -129,6 +129,7 @@ import type { UserRole } from '@/types';
 
 interface Props {
   modelValue: boolean;
+  disableRegistration?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -149,7 +150,7 @@ const localDrawer = computed({
   set: (value) => emit('update:modelValue', value)
 });
 
-const registrationDialog = ref(true);
+const registrationDialog = ref(!props.disableRegistration);
 const formValid = ref(false);
 const userName = ref('');
 const selectedRole = ref<UserRole | null>(null);
@@ -249,8 +250,8 @@ onMounted(async () => {
     submitThenClear.value = JSON.parse(savedSubmitThenClear);
   }
   
-  // Show registration dialog if no established session
-  registrationDialog.value = !sessionStore.isEstablished;
+  // Show registration dialog if no established session and registration is not disabled
+  registrationDialog.value = !props.disableRegistration && !sessionStore.isEstablished;
   
   // Load patient IDs on mount if needed
   if (!sessionStore.isEstablished && patientStore.availablePatientIds.length === 0) {
@@ -268,8 +269,8 @@ watch(() => sessionStore.isEstablished, (isEstablished) => {
   if (isEstablished) {
     registrationDialog.value = false;
   } else {
-    // セッションが終了したら登録ダイアログを表示
-    registrationDialog.value = true;
+    // セッションが終了したら登録ダイアログを表示（ただし、登録が無効化されていない場合のみ）
+    registrationDialog.value = !props.disableRegistration;
   }
 });
 
