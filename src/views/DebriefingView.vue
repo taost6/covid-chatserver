@@ -73,7 +73,7 @@
                       <v-icon color="blue" class="mr-2">mdi-information-outline</v-icon>
                       1. 感染に関わる情報の聴取割合
                     </h4>
-                    <p class="text-body-1 pl-8">{{ debriefingData.information_retrieval_ratio }}</p>
+                    <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.information_retrieval_ratio }}</p>
                   </div>
                 </v-col>
                 <v-col cols="12" md="6">
@@ -82,7 +82,7 @@
                       <v-icon color="green" class="mr-2">mdi-quality-high</v-icon>
                       2. 回答した情報の質
                     </h4>
-                    <p class="text-body-1 pl-8">{{ debriefingData.information_quality }}</p>
+                    <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.information_quality }}</p>
                   </div>
                 </v-col>
               </v-row>
@@ -94,7 +94,7 @@
                   <v-icon color="orange" class="mr-2">mdi-comment-text-outline</v-icon>
                   3. 総評
                 </h4>
-                <p class="text-body-1 pl-8">{{ debriefingData.overall_comment }}</p>
+                <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.overall_comment }}</p>
               </div>
             </v-card-text>
           </v-card>
@@ -120,12 +120,16 @@
                       </span>
                     </template>
                     
-                    <v-card class="mb-4" elevation="1">
+                    <v-card 
+                      class="mb-4" 
+                      elevation="1"
+                      :style="{ borderLeft: `4px solid ${getEvaluationColorHex(item.evaluation_symbol)}` }"
+                    >
                       <v-card-text>
-                        <blockquote class="text-body-1 font-italic mb-3 pa-3 bg-surface-variant rounded">
+                        <blockquote :class="[fontSizeClass, 'font-italic mb-3 pa-3 bg-surface-variant rounded']">
                           "{{ item.utterance }}"
                         </blockquote>
-                        <p class="text-body-1 mb-0">{{ item.advice }}</p>
+                        <p :class="[fontSizeClass, 'mb-0']">{{ item.advice }}</p>
                       </v-card-text>
                     </v-card>
                   </v-timeline-item>
@@ -170,7 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -192,6 +196,17 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const debriefingData = ref<DebriefingData | null>(null);
 const drawer = ref(false);
+const fontSize = ref(1);
+
+// Computed class for font size
+const fontSizeClass = computed(() => {
+  switch (fontSize.value) {
+    case 0: return 'text-caption';
+    case 1: return 'text-body-1';
+    case 2: return 'text-h6';
+    default: return 'text-body-1';
+  }
+});
 
 // Get evaluation color based on symbol
 const getEvaluationColor = (symbol: string) => {
@@ -201,6 +216,18 @@ const getEvaluationColor = (symbol: string) => {
     case '△': return 'orange';
     case '✕': return 'red';
     default: return 'grey-lighten-1';
+  }
+};
+
+
+// Get evaluation color hex based on symbol
+const getEvaluationColorHex = (symbol: string) => {
+  switch (symbol) {
+    case '◎': return '#26A69A';
+    case '○': return '#5C6BC0';
+    case '△': return '#FF9800';
+    case '✕': return '#F44336';
+    default: return '#BDBDBD';
   }
 };
 
@@ -320,7 +347,7 @@ const restoreSessionInfo = async () => {
     isEstablished: sessionStore.isEstablished,
     userRole: sessionStore.userRole,
     targetPatientId: sessionStore.targetPatientId,
-    patient: patientStore.patient,
+    patient: patientStore.patientInfo,
     hasPatientInfo: patientStore.hasPatientInfo
   });
   
@@ -352,6 +379,20 @@ const restoreSessionInfo = async () => {
 onMounted(async () => {
   await restoreSessionInfo();
   loadDebriefingData();
+  
+  // Load font size from localStorage
+  const savedFontSize = localStorage.getItem('chatFontSize');
+  if (savedFontSize) {
+    fontSize.value = parseInt(savedFontSize, 10);
+  }
+  
+  // Listen for font size changes
+  window.addEventListener('fontSizeChanged', () => {
+    const newFontSize = localStorage.getItem('chatFontSize');
+    if (newFontSize) {
+      fontSize.value = parseInt(newFontSize, 10);
+    }
+  });
 });
 </script>
 
