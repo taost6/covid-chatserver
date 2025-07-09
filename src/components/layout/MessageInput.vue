@@ -1,5 +1,6 @@
 <template>
-  <v-footer app class="pa-4 footer-dark">
+  <!-- 通常のチャット入力（保健師・患者用） -->
+  <v-footer v-if="sessionStore.userRole !== '傍聴者'" app class="pa-4 footer-dark">
     <div class="d-flex align-end w-100">
       <v-textarea
         ref="textareaRef"
@@ -34,6 +35,22 @@
       </button>
     </div>
   </v-footer>
+  
+  <!-- 傍聴者用の中断ボタン -->
+  <v-footer v-if="sessionStore.userRole === '傍聴者'" app class="pa-4 footer-dark">
+    <div class="d-flex justify-center w-100">
+      <v-btn 
+        color="warning" 
+        variant="elevated" 
+        size="large"
+        @click="$emit('interrupt-session-with-debrief')"
+        prepend-icon="mdi-stop-circle-outline"
+        class="px-6"
+      >
+        対話を中断して評価を実行する
+      </v-btn>
+    </div>
+  </v-footer>
 </template>
 
 <script setup lang="ts">
@@ -43,6 +60,10 @@ import { useSessionStore } from '@/stores/sessionStore';
 import { useWebSocket } from '@/composables/useWebSocket';
 import { useFocus } from '@/composables/useFocus';
 import { useScrollToBottom } from '@/composables/useScrollToBottom';
+
+const emit = defineEmits<{
+  'interrupt-session-with-debrief': [];
+}>();
 
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();

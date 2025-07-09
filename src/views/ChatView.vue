@@ -14,7 +14,7 @@
     </v-main>
 
     <!-- Message Input -->
-    <MessageInput />
+    <MessageInput @interrupt-session-with-debrief="confirmInterruptDialog = true" />
 
     <!-- Navigation Drawer -->
     <NavigationDrawer 
@@ -22,6 +22,7 @@
       @registration-success="handleRegistrationSuccess"
       @end-session-with-debrief="confirmEndSessionDialog = true"
       @end-session-simple="confirmSimpleEndDialog = true"
+      @interrupt-session-with-debrief="confirmInterruptDialog = true"
     />
 
     <!-- Dialogs -->
@@ -51,6 +52,16 @@
           <v-spacer></v-spacer>
           <v-btn @click="continueConversation">会話を続ける</v-btn>
           <v-btn color="primary" @click="proceedToDebriefing">評価へ進む</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+    
+    <v-dialog v-model="confirmInterruptDialog" max-width="400">
+      <v-card title="対話を中断しますか？" text="現在の対話を中断し、AIによる評価を表示します。">
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn @click="confirmInterruptDialog = false">対話を続行</v-btn>
+          <v-btn color="warning" @click="submitInterruptRequestHandler">評価を実行</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -112,6 +123,7 @@ const chatWindow = ref<InstanceType<typeof ChatWindow>>();
 const drawer = ref(false);
 const confirmEndSessionDialog = ref(false);
 const confirmSimpleEndDialog = ref(false);
+const confirmInterruptDialog = ref(false);
 const toolCallConfirmDialog = ref(false);
 const debriefingData = ref<DebriefingData | null>(null);
 
@@ -120,10 +132,12 @@ const connectionLoadingTitle = computed(() => {
   const userRole = sessionStore.userRole;
   if (userRole === '保健師') {
     return '患者との接続を準備中...';
-  } else if (userRole === 'patient') {
+  } else if (userRole === '患者') {
     return '保健師との接続を準備中...';
+  } else if (userRole === '傍聴者') {
+    return 'AI同士の対話を準備中...';
   }
-  return '保健師との接続を準備中...';
+  return '接続を準備中...';
 });
 
 // WebSocket composable
@@ -188,7 +202,7 @@ const handleRegistrationSuccess = async (data: { userId: string; sessionId: stri
       userId: data.userId,
       sessionId: data.sessionId,
       userName: data.userName,
-      role: data.userRole as 'patient' | '保健師',
+      role: data.userRole as 'patient' | '保健師' | '傍聴者',
       status: 'Waiting' as const,
       targetPatientId: data.patientId,
     };
@@ -196,8 +210,8 @@ const handleRegistrationSuccess = async (data: { userId: string; sessionId: stri
     sessionStore.setUser(user);
     sessionStore.setSessionId(data.sessionId);
     
-    // If user is 保健師, set patient info
-    if (data.userRole === '保健師' && data.patientId) {
+    // If user is 保健師 or 傍聴者, set patient info
+    if ((data.userRole === '保健師' || data.userRole === '傍聴者') && data.patientId) {
       patientStore.setSelectedPatientId(data.patientId);
     }
 
@@ -299,6 +313,20 @@ const submitDebriefingRequestHandler = () => {
     sendDebriefingRequest();
   } catch (error) {
     console.error('Failed to request debriefing:', error);
+    sessionStore.setLoadingDebriefing(false);
+  }
+};
+
+const submitInterruptRequestHandler = () => {
+  // Similar to submitDebriefingRequestHandler but for interrupting
+  confirmInterruptDialog.value = false;
+  drawer.value = false; // サイドバーを隠す
+  sessionStore.setLoadingDebriefing(true);
+  
+  try {
+    sendDebriefingRequest();
+  } catch (error) {
+    console.error('Failed to interrupt session:', error);
     sessionStore.setLoadingDebriefing(false);
   }
 };

@@ -31,11 +31,12 @@
                 <v-radio-group v-model="selectedRole" :rules="[rules.required]" label="あなたのロール">
                   <v-radio label="保健師" value="保健師"></v-radio>
                   <v-radio label="患者" value="患者"></v-radio>
+                  <v-radio label="自動進行" value="傍聴者"></v-radio>
                 </v-radio-group>
                 <v-select 
-                  v-if="selectedRole === '保健師'" 
+                  v-if="selectedRole === '保健師' || selectedRole === '傍聴者'" 
                   v-model="selectedPatientId" 
-                  label="担当する患者ID" 
+                  :label="selectedRole === '保健師' ? '担当する患者ID' : '患者ID'" 
                   :items="patientStore.availablePatientIds" 
                   :rules="[rules.required]" 
                   required
@@ -67,6 +68,16 @@
         variant="outlined"
       >
         <v-btn @click="$emit('end-session-simple')">会話の終了</v-btn>
+      </v-list-item>
+      
+      <v-list-item 
+        v-if="sessionStore.userRole === '傍聴者'" 
+        id="submitInterruptWithDebrief" 
+        class="mt-2 mr-2" 
+        prepend-icon="mdi-stop-circle-outline" 
+        variant="outlined"
+      >
+        <v-btn @click="$emit('interrupt-session-with-debrief')">対話を中断して評価を実行する</v-btn>
       </v-list-item>
       
       <v-divider thickness="2" color="block" class="my-3"></v-divider>
@@ -139,6 +150,7 @@ const emit = defineEmits<{
   'registration-success': [data: { userId: string; sessionId: string; userName: string; userRole: string; patientId: string | null }];
   'end-session-with-debrief': [];
   'end-session-simple': [];
+  'interrupt-session-with-debrief': [];
 }>();
 
 const router = useRouter();
@@ -179,7 +191,7 @@ const handleRegistration = async () => {
     const userData = {
       user_name: userName.value,
       user_role: selectedRole.value,
-      target_patient_id: selectedRole.value === '保健師' ? selectedPatientId.value! : undefined,
+      target_patient_id: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? selectedPatientId.value! : undefined,
     };
     
     const result = await api.registerUser(userData);
@@ -190,7 +202,7 @@ const handleRegistration = async () => {
         sessionId: result.session_id,
         userName: userName.value,
         userRole: selectedRole.value,
-        patientId: selectedRole.value === '保健師' ? selectedPatientId.value : null,
+        patientId: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? selectedPatientId.value : null,
       });
       registrationDialog.value = false;
     }

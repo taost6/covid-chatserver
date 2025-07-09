@@ -93,7 +93,7 @@ const showPanel = computed(() => {
     return sessionStore.user || patientStore.hasPatientInfo;
   }
   // For regular chat page, require established session
-  return sessionStore.userRole === '保健師' && sessionStore.isEstablished;
+  return (sessionStore.userRole === '保健師' || sessionStore.userRole === '傍聴者') && sessionStore.isEstablished;
 });
 
 // Load patient details when a patient is selected

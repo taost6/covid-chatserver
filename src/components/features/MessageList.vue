@@ -134,8 +134,39 @@ const formatTimestamp = (timestamp: string) => {
 
 // Process message to handle markdown links and sanitize HTML
 const processMessage = (message: string) => {
+  // Filter out function calling text
+  let filteredMessage = message;
+  
+  // Remove function calling related text patterns
+  const functionCallPatterns = [
+    /end_conversation_and_start_debriefing/g,
+    /submit_debriefing_report/g,
+    /Tool\s*call\s*detected/gi,
+    /Function\s*call/gi,
+    /\bfunction\s*:\s*\w+/gi,
+    /\btools?\s*=\s*\[?\]?/gi,
+    /\btool_choice\s*=/gi,
+    /\bassistant_id\s*=/gi,
+    /\bthread_id\s*=/gi,
+    /\buser_msg\s*=/gi,
+    /\bai_role\s*=/gi,
+    /^.*end_conversation_and_start_debriefing.*$/gm
+  ];
+  
+  functionCallPatterns.forEach(pattern => {
+    filteredMessage = filteredMessage.replace(pattern, '');
+  });
+  
+  // Clean up any extra whitespace left by filtering
+  filteredMessage = filteredMessage.replace(/\s+/g, ' ').trim();
+  
+  // If message is empty after filtering, return original message
+  if (!filteredMessage) {
+    filteredMessage = message;
+  }
+  
   // Escape HTML first
-  const escaped = message
+  const escaped = filteredMessage
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

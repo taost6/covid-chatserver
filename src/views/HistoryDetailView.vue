@@ -79,17 +79,46 @@ const downloadCSV = async () => {
 
 // Format messages for MessageList component
 const formattedMessages = computed(() => {
-  return historyStore.currentSession.map(item => ({
-    sender: item.sender.toLowerCase() === 'system' ? 'system' : item.sender.toLowerCase(),
-    message: item.message,
-    icon: getIcon(item.sender, item.role),
-    created_at: item.created_at
-  }));
+  return historyStore.currentSession.map(item => {
+    let sender = item.sender.toLowerCase();
+    
+    // システムメッセージの場合はそのまま
+    if (sender === 'system') {
+      return {
+        sender: 'system',
+        message: item.message,
+        icon: getIcon(item.sender, item.role),
+        created_at: item.created_at
+      };
+    }
+    
+    // 傍聴者セッションの場合は、AIの発言を役割に応じて左右に配置
+    if (item.role === '傍聴者') {
+      // AIの発言の場合、ai_roleフィールドを使用して決定論的に判断
+      if (sender === 'assistant' && item.ai_role) {
+        // ai_roleフィールドを使用して発言者の役割を決定
+        // 保健師AIの発言は右側（user）、患者AIの発言は左側（assistant）
+        if (item.ai_role === '保健師') {
+          sender = 'user'; // 保健師AIの発言は右側
+        } else if (item.ai_role === '患者') {
+          sender = 'assistant'; // 患者AIの発言は左側
+        }
+      }
+    }
+    
+    return {
+      sender: sender,
+      message: item.message,
+      icon: getIcon(item.sender, item.role),
+      created_at: item.created_at
+    };
+  });
 });
 
 const getIcon = (sender: string, role: string) => {
   if (sender === 'User') {
-    return role === '保健師' ? 'mdi-account-tie-woman' : 'mdi-account';
+    return role === '保健師' ? 'mdi-account-tie-woman' : 
+           role === '傍聴者' ? 'mdi-eye-outline' : 'mdi-account';
   } else if (sender === 'Assistant') {
     return role === '患者' ? 'mdi-account' : 'mdi-account-tie-woman';
   } else if (sender === 'System') {

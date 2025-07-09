@@ -33,8 +33,9 @@ export const useChatStore = defineStore('chat', {
       console.log('[ChatStore] Total messages:', this.messages.length);
     },
 
-    addUserMessage(text: string, userRole: '保健師' | '患者') {
-      const icon = userRole === '保健師' ? 'mdi-account-tie-woman' : 'mdi-account';
+    addUserMessage(text: string, userRole: '保健師' | '患者' | '傍聴者') {
+      const icon = userRole === '保健師' ? 'mdi-account-tie-woman' : 
+                   userRole === '傍聴者' ? 'mdi-eye-outline' : 'mdi-account';
       this.addMessage({
         sender: 'user',
         message: text,
@@ -42,8 +43,9 @@ export const useChatStore = defineStore('chat', {
       });
     },
 
-    addAssistantMessage(text: string, userRole: '保健師' | '患者') {
-      const icon = userRole === '保健師' ? 'mdi-account' : 'mdi-account-tie-woman';
+    addAssistantMessage(text: string, userRole: '保健師' | '患者' | '傍聴者') {
+      const icon = userRole === '保健師' ? 'mdi-account' : 
+                   userRole === '傍聴者' ? 'mdi-robot-outline' : 'mdi-account-tie-woman';
       this.addMessage({
         sender: 'assistant',
         message: text,
@@ -56,6 +58,34 @@ export const useChatStore = defineStore('chat', {
         sender: 'system',
         message: text,
         icon: 'mdi-alert-circle-outline',
+      });
+    },
+
+    // 傍聴者専用：保健師AIの発言（右側表示）
+    addNurseAIMessage(text: string) {
+      // Function call関連のテキストを含む場合は表示しない
+      if (text.toLowerCase().includes('end_conversation_and_start_debriefing')) {
+        return;
+      }
+      
+      this.addMessage({
+        sender: 'user', // 右側に表示させるためuserに設定
+        message: text,
+        icon: 'mdi-account-tie-woman',
+      });
+    },
+
+    // 傍聴者専用：患者AIの発言（左側表示）
+    addPatientAIMessage(text: string) {
+      // Function call関連のテキストを含む場合は表示しない
+      if (text.toLowerCase().includes('end_conversation_and_start_debriefing')) {
+        return;
+      }
+      
+      this.addMessage({
+        sender: 'assistant', // 左側に表示させるためassistantに設定
+        message: text,
+        icon: 'mdi-account',
       });
     },
 

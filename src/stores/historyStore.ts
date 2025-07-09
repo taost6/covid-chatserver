@@ -13,6 +13,7 @@ interface ChatLog {
   id: number;
   sender: string;
   role: string;
+  ai_role?: string;
   message: string;
   created_at: string;
 }

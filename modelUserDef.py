@@ -3,7 +3,7 @@ from typing import Literal, Union, List, Optional, Any
 
 class AssistantDef(BaseModel):
     user_id: str      = Field(description="Identifier exposed to the peer")
-    role: Literal["保健師","患者","評価者"] = Field(description="Assistant Role")
+    role: Literal["保健師","患者","評価者","傍聴者"] = Field(description="Assistant Role")
     assistant_id: str = Field(description="Assistant ID to be communicated.")
     thread_id: Optional[str] = Field(None,
             description="Thread Idenfifier of OpenAI API")
@@ -11,7 +11,7 @@ class AssistantDef(BaseModel):
 class UserDef(BaseModel):
     user_id: str = Field(description="User ID")
     user_name: str = Field(description="User Name")
-    role: Literal["保健師","患者","評価者"] = Field(description="Assistant Role")
+    role: Literal["保健師","患者","評価者","傍聴者"] = Field(description="Assistant Role")
     status: str  = Field(description="User Status")
     ws: Any      = Field(None, description="Placeholder of WebSocket")
     target_patient_id: Optional[str] = Field(None, description="保健師が指定した患者ID")

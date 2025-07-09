@@ -96,7 +96,7 @@ class Status(Enum):
 class RegistrationRequest(BaseModel):
     msg_type: str=MsgType.RegistrationRequest.name
     user_name: str
-    user_role: Literal["保健師", "患者"]
+    user_role: Literal["保健師", "患者", "傍聴者"]
     target_patient_id: Optional[str] = Field(None,
             description="保健師が対話したい患者のID")
 

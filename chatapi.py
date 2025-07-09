@@ -2,8 +2,8 @@ from fastapi import FastAPI, Body, Request, HTTPException, Depends, WebSocket, W
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel
-from typing import List, Union
+from pydantic import BaseModel, ConfigDict
+from typing import List, Union, Optional, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 import uuid
@@ -22,11 +22,15 @@ import modelDatabase
 from modelSession import Session as SessionModel # New
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
+from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 
 class APISession(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     users: List[Union[UserDef, AssistantDef]]
     history: History
     session_id: str
+    ai_conversation_manager: Optional[Any] = None
 
 # --- Global State ---
 users_waiting = {}
@@ -37,7 +41,7 @@ def get_id() -> str:
     base = f"{datetime.now().timestamp()}-{random()}"
     return sha1(base.encode()).hexdigest()
 
-async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False):
+async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False, ai_role: str = None):
     if not modelDatabase.SessionLocal:
         return
     try:
@@ -47,7 +51,7 @@ async def log_message(db: Session, session_id: str, user_name: str, patient_id: 
         log_entry = modelDatabase.ChatLog(
             session_id=session_id, user_name=user_name, patient_id=patient_id,
             user_role=user_role, sender=sender, message=message,
-            is_initial_message=is_initial_message,
+            ai_role=ai_role, is_initial_message=is_initial_message,
             created_at=datetime.now(jst)
         )
         db.add(log_entry)
@@ -86,14 +90,17 @@ def _find_peer_ai(user: UserDef) -> AssistantDef:
     assistants = json.load(open("assistants.json"))
     if user.role == "保健師":
         return AssistantDef(
-            user_id=get_id(), role="患者",
+            user_id=ai_get_id(), role="患者",
             assistant_id=assistants[0],
         )
     elif user.role == "患者":
         return AssistantDef(
-            user_id=get_id(), role="保健師",
+            user_id=ai_get_id(), role="保健師",
             assistant_id=assistants[1],
         )
+    elif user.role == "傍聴者":
+        # 傍聴者の場合は特別処理が必要（AIConversationManagerで処理）
+        return None
     return None
 
 def _find_user_session(user_id: str) -> APISession:
@@ -106,7 +113,7 @@ def _find_user_session(user_id: str) -> APISession:
 async def _execute_debriefing_with_specialist(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
     """Debriefing専用Assistantを使用してクリーンな環境で評価を実行する"""
     
-    if user.role != "保健師":
+    if user.role not in ["保健師", "傍聴者"]:
         logger.info(f"Debriefing skipped for user role: {user.role}")
         await user.ws.send_json(SessionTerminated(session_id=session.session_id, reason="Session ended by user.").dict())
         await user.ws.close()
@@ -142,7 +149,7 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
 
     # Debriefing専用のAssistant定義を作成
     debriefing_assistant = AssistantDef(
-        user_id=get_id(),
+        user_id=ai_get_id(),
         role="評価者",
         assistant_id=debriefing_assistant_id,
         thread_id=debriefing_thread_id
@@ -330,6 +337,10 @@ def api(config):
         if not db_session:
             raise HTTPException(status_code=404, detail="Active session not found.")
 
+        # 傍聴者の場合はセッション復元をサポートしない
+        if db_session.user_role == "傍聴者":
+            raise HTTPException(status_code=400, detail="Session restoration is not supported for observer role.")
+
         # If session is found, proceed to gather history and other details
         if role_provider.df is None:
             logger.warning("Role provider not initialized in get_session_status. Initializing...")
@@ -391,7 +402,7 @@ def api(config):
                     })
 
         # Create a new user_id for the restored session to allow reconnection
-        new_user_id = get_id()
+        new_user_id = ai_get_id()
         restored_user = UserDef(
             user_id=new_user_id,
             user_name=db_session.user_name,
@@ -454,6 +465,7 @@ def api(config):
                 "id": log.id,
                 "sender": log.sender,
                 "role": log.user_role,
+                "ai_role": log.ai_role,
                 "message": log.message,
                 "created_at": log.created_at.isoformat()
             } for log in logs
@@ -491,7 +503,7 @@ def api(config):
         if req.msg_type != MsgType.RegistrationRequest.name:
             raise HTTPException(status_code=406, detail="Invalid message type")
         
-        user_id = get_id()
+        user_id = ai_get_id()
         session_id = str(uuid.uuid4())
         users_waiting[user_id] = UserDef(
             user_id=user_id, user_name=req.user_name, role=req.user_role,
@@ -529,33 +541,41 @@ def api(config):
             db_session = db.query(SessionModel).filter(SessionModel.session_id == user.session_id).first()
             if db_session and db_session.status == 'active':
                 logger.info(f"No active session in memory for {user.session_id}. Rebuilding from DB.")
-                assistant = _find_peer_ai(user)
-                assistant.thread_id = db_session.thread_id
-                history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
-                active_session = APISession(users=[user, assistant], history=history, session_id=user.session_id)
-                users_session[user.session_id] = active_session
-
-                # Restore history from DB
-                history_logs = db.query(modelDatabase.ChatLog).filter(
-                    modelDatabase.ChatLog.session_id == active_session.session_id,
-                    modelDatabase.ChatLog.sender != 'System'
-                ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
-
-                for log in history_logs:
-                    user_role = user.role
-                    assistant_role = "患者" if user_role == "保健師" else "保健師"
-                    role = user_role if log.sender == 'User' else assistant_role
-                    active_session.history.history.append(MessageInfo(role=role, text=log.message))
                 
-                logger.info(f"Restored {len(history_logs)} messages to server-side session history for session {user.session_id}.")
-                await _session_handler(user, db, logger, oaw)
-                return
+                # 傍聴者の場合はセッション復元をサポートしない
+                if user.role == "傍聴者":
+                    logger.warning(f"Session restoration is not supported for observer role. Closing connection for user {user.user_id}")
+                    await user.ws.close(code=1000, reason="Session restoration not supported for observer role")
+                    return
+                
+                assistant = _find_peer_ai(user)
+                if assistant:
+                    assistant.thread_id = db_session.thread_id
+                    history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
+                    active_session = APISession(users=[user, assistant], history=history, session_id=user.session_id)
+                    users_session[user.session_id] = active_session
+
+                    # Restore history from DB
+                    history_logs = db.query(modelDatabase.ChatLog).filter(
+                        modelDatabase.ChatLog.session_id == active_session.session_id,
+                        modelDatabase.ChatLog.sender != 'System'
+                    ).order_by(modelDatabase.ChatLog.created_at.asc()).all()
+
+                    for log in history_logs:
+                        user_role = user.role
+                        assistant_role = "患者" if user_role == "保健師" else "保健師"
+                        role = user_role if log.sender == 'User' else assistant_role
+                        active_session.history.history.append(MessageInfo(role=role, text=log.message))
+                    
+                    logger.info(f"Restored {len(history_logs)} messages to server-side session history for session {user.session_id}.")
+                    await _session_handler(user, db, logger, oaw)
+                    return
 
             # Case 3: Creating a new session
             logger.info(f"Creating a new session for user {user.user_id}")
             peer = _find_peer_human(user)
             if peer:
-                session_id = user.session_id or get_id() # Fallback for safety
+                session_id = user.session_id or ai_get_id() # Fallback for safety
                 session = APISession(users=[user, peer], history=History(), session_id=session_id)
                 users_session[session_id] = session
                 del users_waiting[user.user_id]
@@ -583,7 +603,7 @@ def api(config):
                             session_id=session_id,
                             user_name=user.user_name,
                             user_role=user.role,
-                            patient_id=user.target_patient_id if user.role == "保健師" else None,
+                            patient_id=user.target_patient_id if user.role in ["保健師", "傍聴者"] else None,
                             status='active'
                         )
                         db.add(db_session)
@@ -628,13 +648,16 @@ def api(config):
                             patient_name = patient_details.get("name", "名無し")
                             initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
                             history.history.append(MessageInfo(role="患者", text=initial_bot_message))
-                            await log_message(db, session_id, "AI", patient_id_for_ai, "患者", "Assistant", initial_bot_message, logger, is_initial_message=True)
+                            await log_message(db, session_id, "AI", patient_id_for_ai, user.role, "Assistant", initial_bot_message, logger, is_initial_message=True, ai_role="患者")
                         elif prompt_needed:
                              logger.error(f"Failed to generate prompt for patient ID {patient_id_for_ai}")
 
                     elif assistant.role == "保健師":
                         if prompt_needed:
-                            interview_date_str = datetime.now().strftime("%Y年%m月%d日")
+                            # 患者の感染日/発症日に基づいて面接日を計算（共通メソッド使用）
+                            patient_id_for_ai = user.target_patient_id or "1"
+                            interview_date_str = role_provider.calculate_interview_date(patient_id_for_ai)
+                            
                             db_session.interview_date = interview_date_str
                             db.commit()
 
@@ -644,12 +667,72 @@ def api(config):
                                 history.history.append(MessageInfo(role="system", text=chunk))
                                 await log_message(db, session_id, user.user_name, "N/A", user.role, "System", chunk, logger)
                             
+                            # 保健師AIの初期メッセージを会話ログに含める
                             history.history.append(MessageInfo(role="保健師", text=initial_bot_message))
-                            await log_message(db, session_id, "AI", assistant.assistant_id, "保健師", "Assistant", initial_bot_message, logger, is_initial_message=True)
+                            await log_message(db, session_id, "AI", assistant.assistant_id, user.role, "Assistant", initial_bot_message, logger, is_initial_message=False, ai_role="保健師")
                             await user.ws.send_json(MessageForwarded(session_id=session_id, user_msg=initial_bot_message).dict())
 
                     final_interview_date = db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日")
                     await user.ws.send_json(Established(session_id=session_id, interview_date=final_interview_date).dict())
+                    await _session_handler(user, db, logger, oaw)
+                elif user.role == "傍聴者":
+                    # 傍聴者の場合はAI同士の対話を開始
+                    session_id = user.session_id
+                    if not session_id:
+                        logger.error(f"Session ID is missing for observer {user.user_id}. Cannot establish session.")
+                        await user.ws.close(code=1011, reason="Internal server error: session_id missing")
+                        return
+
+                    # Check if session already exists in the database
+                    db_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+
+                    if not db_session:
+                        # Create a new session record for observer
+                        logger.info(f"Creating observer session record for session_id: {session_id}")
+                        db_session = SessionModel(
+                            session_id=session_id,
+                            user_name=user.user_name,
+                            user_role=user.role,
+                            patient_id=user.target_patient_id,
+                            status='active'
+                        )
+                        db.add(db_session)
+                        db.commit()
+                        db.refresh(db_session)
+
+                    # Create session with AI conversation manager
+                    history = History()
+                    session = APISession(users=[user], history=history, session_id=session_id)
+                    
+                    # Initialize AI conversation manager
+                    ai_manager = AIConversationManager(session, user, oaw, role_provider, db, logger)
+                    session.ai_conversation_manager = ai_manager
+                    
+                    if not await ai_manager.initialize_ais():
+                        logger.error(f"Failed to initialize AI conversation for observer {user.user_id}")
+                        await user.ws.close(code=1011, reason="Failed to initialize AI conversation")
+                        return
+                    
+                    # 面接日を計算してデータベースに保存（保健師ロールと同じロジック）
+                    patient_id_for_ai = user.target_patient_id or "1"
+                    prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                    db_session.interview_date = interview_date_str
+                    db.commit()
+                    
+                    if not await ai_manager.setup_ai_prompts(interview_date_str):
+                        logger.error(f"Failed to setup AI prompts for observer {user.user_id}")
+                        await user.ws.close(code=1011, reason="Failed to setup AI prompts")
+                        return
+                    
+                    users_session[session_id] = session
+                    del users_waiting[user.user_id]
+
+                    final_interview_date = db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日")
+                    await user.ws.send_json(Established(session_id=session_id, interview_date=final_interview_date).dict())
+                    
+                    # Start AI conversation
+                    await ai_manager.start_conversation()
+                    
                     await _session_handler(user, db, logger, oaw)
                 else:
                     await user.ws.send_json(Prepared().dict())
@@ -728,7 +811,7 @@ def api(config):
                                 else:
                                     # 通常のテキスト応答
                                     session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
-                                    await log_message(db, session.session_id, "AI", peer.assistant_id, peer.role, "Assistant", response_msg, logger, is_initial_message=False)
+                                    await log_message(db, session.session_id, "AI", peer.assistant_id, user.role, "Assistant", response_msg, logger, is_initial_message=False, ai_role=peer.role)
                                     await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
                         elif isinstance(peer, UserDef):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
@@ -737,19 +820,31 @@ def api(config):
                 elif msg_type == MsgType.DebriefingRequest.name:
                     m = DebriefingRequest.model_validate(data)
                     logger.info(f"DebriefingRequest received from user: {m.user_id}")
+                    
+                    # 傍聴者の場合はAI対話を確実に停止
+                    if user.role == "傍聴者" and session.ai_conversation_manager:
+                        await session.ai_conversation_manager.stop_conversation()
+                        logger.info(f"AI conversation stopped for debriefing in session {session.session_id}")
+                    
                     await _execute_debriefing(session, user, db, logger, oaw)
 
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)
                     logger.info(f"ContinueConversationRequest received from user: {m.user_id}")
-                    peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
-                    if peer_ai and oaw:
-                        cancelled = await oaw.cancel_run(peer_ai.thread_id)
-                        if cancelled:
-                            logger.info(f"Run cancelled for thread {peer_ai.thread_id}. Notifying client to continue.")
-                            await user.ws.send_json(ConversationContinueAccepted(session_id=session.session_id).dict())
-                        else:
-                            logger.warning(f"Failed to cancel run for thread {peer_ai.thread_id}. Client might be stuck.")
+                    
+                    if user.role == "傍聴者" and session.ai_conversation_manager:
+                        # 傍聴者の場合はAI対話を継続
+                        await session.ai_conversation_manager.handle_continue_conversation()
+                    else:
+                        # 通常の人間対AI対話の場合
+                        peer_ai = next((p for p in session.users if isinstance(p, AssistantDef)), None)
+                        if peer_ai and oaw:
+                            cancelled = await oaw.cancel_run(peer_ai.thread_id)
+                            if cancelled:
+                                logger.info(f"Run cancelled for thread {peer_ai.thread_id}. Notifying client to continue.")
+                                await user.ws.send_json(ConversationContinueAccepted(session_id=session.session_id).dict())
+                            else:
+                                logger.warning(f"Failed to cancel run for thread {peer_ai.thread_id}. Client might be stuck.")
 
                 elif msg_type == MsgType.EndSessionRequest.name:
                     m = EndSessionRequest.model_validate(data)
@@ -761,6 +856,10 @@ def api(config):
                         db_session.status = 'completed'
                         db_session.completed_at = datetime.now()
                         db.commit()
+
+                    # 傍聴者の場合はAI対話を停止
+                    if user.role == "傍聴者" and session.ai_conversation_manager:
+                        await session.ai_conversation_manager.cleanup()
 
                     for u in session.users:
                         if hasattr(u, 'ws') and u.ws:
@@ -776,6 +875,12 @@ def api(config):
             logger.error(f"Error in session handler: {e}")
         finally:
             if session.session_id in users_session:
+                # 傍聴者の場合は AI対話を停止
+                if user.role == "傍聴者" and session.ai_conversation_manager:
+                    try:
+                        await session.ai_conversation_manager.cleanup()
+                    except Exception as e:
+                        logger.error(f"Error during AI conversation cleanup: {e}")
                 del users_session[session.session_id]
 
     # SPA fallback: serve index.html for non-API routes

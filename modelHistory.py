@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Literal, Optional, List, Union, Any
 
 class MessageInfo(BaseModel):
-    role: Literal["保健師","患者", "system"] = Field(
+    role: Literal["保健師","患者","傍聴者", "system"] = Field(
             description="Role name of the entiry submitted the request. 'system' is for internal use.")
     text: str = Field(
             description="text message in the request or response.")
@@ -10,7 +10,7 @@ class MessageInfo(BaseModel):
 class AssistantInfo(BaseModel):
     assistant_id: str = Field(
             description="Assistant ID.")
-    role: Literal["保健師","患者"] = Field(
+    role: Literal["保健師","患者","傍聴者"] = Field(
             description="Assistant's role")
 
 class History(BaseModel):

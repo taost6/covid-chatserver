@@ -15,6 +15,12 @@
               （患者ID: <span class="font-weight-bold text-blue-darken-3">{{ patientStore.patientInfo.id }}</span>）
             </span>
           </span>
+          <span v-else-if="sessionStore.userRole === '傍聴者'">
+            AI同士の対話を傍聴中
+            <span v-if="patientStore.patientInfo?.id">
+              （患者ID: <span class="font-weight-bold text-blue-darken-3">{{ patientStore.patientInfo.id }}</span>）
+            </span>
+          </span>
           <span v-else>
             保健師
           </span>

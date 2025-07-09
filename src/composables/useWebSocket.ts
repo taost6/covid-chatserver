@@ -119,10 +119,20 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       case 'MessageForwarded':
         if (message.user_msg) {
-          chatStore.addAssistantMessage(
-            message.user_msg, 
-            sessionStore.userRole!
-          );
+          // 傍聴者の場合は、AIの発言者に応じて表示を切り替える
+          if (sessionStore.userRole === '傍聴者' && (message as any).ai_role) {
+            const aiRole = (message as any).ai_role;
+            if (aiRole === '保健師') {
+              chatStore.addNurseAIMessage(message.user_msg);
+            } else if (aiRole === '患者') {
+              chatStore.addPatientAIMessage(message.user_msg);
+            }
+          } else {
+            chatStore.addAssistantMessage(
+              message.user_msg, 
+              sessionStore.userRole!
+            );
+          }
         }
         chatStore.setInputLocked(false);
         break;
