@@ -37,7 +37,7 @@
           <v-card class="mb-6" elevation="2">
             <v-card-title class="text-h5 font-weight-bold d-flex align-center bg-primary text-white">
               <v-icon class="mr-3" size="large">mdi-star-circle</v-icon>
-              総合評価
+              総合評価（評価者: GPT-4o）
             </v-card-title>
             <v-card-text class="pa-6">
               <div class="text-center">

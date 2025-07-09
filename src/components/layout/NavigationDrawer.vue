@@ -31,7 +31,7 @@
                 <v-radio-group v-model="selectedRole" :rules="[rules.required]" label="あなたのロール">
                   <v-radio label="保健師" value="保健師"></v-radio>
                   <v-radio label="患者" value="患者"></v-radio>
-                  <v-radio label="自動進行" value="傍聴者"></v-radio>
+                  <v-radio label="自動対話" value="傍聴者"></v-radio>
                 </v-radio-group>
                 <v-select 
                   v-if="selectedRole === '保健師' || selectedRole === '傍聴者'" 
