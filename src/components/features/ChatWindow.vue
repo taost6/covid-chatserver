@@ -89,7 +89,6 @@ defineExpose({
 
 #chat-history-container {
   flex: 1 1 auto;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }

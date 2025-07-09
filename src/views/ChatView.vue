@@ -1,7 +1,7 @@
 <template>
-  <v-app style="height: 100vh; display: flex; flex-direction: column;">
-    <v-main style="flex: 1 1 auto; overflow: scroll; display: flex; flex-direction: column;">
-      <v-container fluid class="pa-md-4 pa-2 d-flex flex-column" style="flex: 1 1 auto; display: flex; flex-direction: column;">
+  <v-app class="chat-app">
+    <v-main class="chat-main">
+      <v-container fluid class="pa-md-4 pa-2 chat-container">
         <!-- Header -->
         <AppHeader @toggle-drawer="drawer = !drawer" />
 
@@ -13,8 +13,11 @@
       </v-container>
     </v-main>
 
-    <!-- Message Input -->
-    <MessageInput @interrupt-session-with-debrief="confirmInterruptDialog = true" />
+    <!-- Message Input (Fixed Footer) -->
+    <MessageInput 
+      class="chat-input-footer"
+      @interrupt-session-with-debrief="confirmInterruptDialog = true" 
+    />
 
     <!-- Navigation Drawer -->
     <NavigationDrawer 
@@ -448,7 +451,66 @@ onMounted(async () => {
 });
 </script>
 
-<style>
-/* Global styles from App.vue */
-/* ... (same as before) ... */
+<style scoped>
+/* ChatView specific mobile layout styles */
+.chat-app {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 80px; /* フッターの高さ分の余白 */
+}
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 8px !important;
+}
+
+.chat-input-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: white;
+  border-top: 1px solid #e0e0e0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* モバイル向けのViewport調整 */
+@media screen and (max-width: 768px) {
+  .chat-app {
+    height: 100vh;
+    height: 100dvh;
+  }
+  
+  .chat-main {
+    padding-bottom: 88px !important; /* モバイルでのフッター高さ調整 */
+  }
+  
+  .chat-container {
+    padding: 4px !important;
+  }
+}
+
+/* iOS Safari対応 */
+@supports (-webkit-touch-callout: none) {
+  .chat-app {
+    height: 100vh;
+    height: -webkit-fill-available;
+  }
+  
+  .chat-main {
+    padding-bottom: 88px !important;
+  }
+}
 </style>

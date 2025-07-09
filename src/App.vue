@@ -14,14 +14,31 @@
   box-sizing: border-box;
 }
 
+/* スマホ対応のViewport設定 */
+html, body {
+  height: 100%;
+  height: 100vh;
+  /* スマホのUIバーを考慮した高さ設定 */
+  height: 100dvh; /* Dynamic viewport height */
+  overflow: hidden;
+}
+
 /* Hide scrollbars but keep scrolling functionality */
 html::-webkit-scrollbar,
 body::-webkit-scrollbar {
   display: none;
 }
 
-html, body {
-  overflow-y: scroll;
+/* Vuetify アプリケーションのスマホ対応 */
+.v-application {
+  height: 100vh !important;
+  height: 100dvh !important; /* Dynamic viewport height */
+}
+
+.v-main {
+  height: calc(100vh - 64px) !important; /* ヘッダーの高さを引く */
+  height: calc(100dvh - 64px) !important;
+  overflow-y: auto !important;
 }
 
 /* Application background */

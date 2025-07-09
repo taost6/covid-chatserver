@@ -125,6 +125,29 @@ onMounted(() => {
 /* Footer dark theme */
 .footer-dark {
   background-color: #1e293b !important;
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 1000 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* スマホ向けの調整 */
+@media screen and (max-width: 768px) {
+  .footer-dark {
+    padding: 8px 16px !important;
+  }
+  
+  .message-textarea {
+    margin-right: 8px !important;
+  }
+  
+  .custom-send-button {
+    width: 48px !important;
+    min-height: 48px !important;
+  }
 }
 
 /* Message textarea styling */

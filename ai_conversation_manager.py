@@ -5,7 +5,6 @@ from datetime import datetime, timezone, timedelta
 from modelUserDef import UserDef, AssistantDef
 from modelHistory import MessageInfo
 from modelChat import ToolCallDetected, MessageForwarded, ConversationContinueAccepted
-# from modelDatabase import ChatLog  # 循環インポート回避のため削除
 from modelRole import PatientRoleProvider
 from openai_assistant import OpenAIAssistantWrapper
 import json

@@ -2,7 +2,8 @@ import type {
   ApiResponse, 
   PatientListResponse, 
   PatientInfo, 
-  SessionRestoreResponse 
+  SessionRestoreResponse,
+  UserRole
 } from '@/types';
 
 class ApiError extends Error {
@@ -72,7 +73,7 @@ export const api = {
 
   async registerUser(userData: {
     user_name: string;
-    user_role: '保健師' | '患者';
+    user_role: UserRole;
     target_patient_id?: string;
   }): Promise<{ user_id: string; session_id: string; msg_type: string }> {
     const protocol = window.location.protocol.replace(':', '');
