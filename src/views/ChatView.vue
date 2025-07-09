@@ -407,6 +407,28 @@ const restoreSession = async () => {
       patientStore.setSelectedPatientId(sessionData.patient_id);
     }
     
+    // 傍聴者ロール（自動対話）の場合はセッションを破棄してロール選択モーダルを表示
+    if (sessionData.user_role === '傍聴者') {
+      console.log('Observer role session detected, destroying session and showing role selection modal');
+      
+      // セッションを破棄
+      try {
+        const destroyUrl = `${protocol}://${host}/v1/session/${sessionData.session_id}/destroy`;
+        await fetch(destroyUrl, { method: 'POST' });
+      } catch (error) {
+        console.error('Failed to destroy observer session:', error);
+      }
+      
+      // ローカルストレージとストアをクリア
+      localStorage.removeItem('activeSession');
+      sessionStore.clearSession();
+      chatStore.reset();
+      patientStore.reset();
+      
+      // ロール選択モーダルを表示するために早期リターン
+      return;
+    }
+    
     // Update user status to Established (since session was already active)
     user.status = 'Established';
     sessionStore.setUser(user);
