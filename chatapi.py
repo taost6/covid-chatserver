@@ -337,9 +337,9 @@ def api(config):
         if not db_session:
             raise HTTPException(status_code=404, detail="Active session not found.")
 
-        # 傍聴者の場合はセッション復元をサポートしない
-        if db_session.user_role == "傍聴者":
-            raise HTTPException(status_code=400, detail="Session restoration is not supported for observer role.")
+        # 傍聴者の場合はセッション復元をサポートしない（ただし評価レポート表示のための情報取得は許可）
+        # if db_session.user_role == "傍聴者":
+        #     raise HTTPException(status_code=400, detail="Session restoration is not supported for observer role.")
 
         # If session is found, proceed to gather history and other details
         if role_provider.df is None:
@@ -373,7 +373,7 @@ def api(config):
                 })
 
         patient_info = {}
-        if db_session.user_role == '保健師' and db_session.patient_id:
+        if db_session.patient_id:
             patient_info = role_provider.get_patient_details(db_session.patient_id)
 
         # Check if debriefing report exists for this session

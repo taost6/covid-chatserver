@@ -241,6 +241,8 @@ const loadDebriefingData = async () => {
     if (route.params.data) {
       debriefingData.value = JSON.parse(route.params.data as string);
       loading.value = false;
+      
+      // Don't load session data - use existing session info from ChatView transition
       return;
     }
     
@@ -260,8 +262,7 @@ const loadDebriefingData = async () => {
       const data = await response.json();
       debriefingData.value = data;
       
-      // Also try to load session data for patient info
-      await loadSessionDataFromApi(sessionId);
+      // Don't load session data - use existing session info
     } else {
       throw new Error('セッションIDまたは評価データが指定されていません');
     }
@@ -314,14 +315,25 @@ const loadSessionDataFromApi = async (sessionId: string) => {
         console.log('[DebriefingView] Setting patient ID from API:', sessionData.patient_id);
         patientStore.setSelectedPatientId(sessionData.patient_id);
       }
+    } else if (response.status === 400) {
+      // 傍聴者ロールの場合は400エラーが返される（これは正常な動作）
+      console.log('[DebriefingView] Session restore not supported for observer role (status 400) - this is expected');
+      return; // エラーを投げずに終了
     } else {
       console.error('[DebriefingView] Failed to load session data from API:', response.status);
+      throw new Error(`HTTP ${response.status}`);
     }
   } catch (error) {
-    console.error('[DebriefingView] Error loading session data from API:', error);
+    // fetchエラーの場合のみログ出力してエラーを再投げ
+    if (error instanceof TypeError) {
+      console.error('[DebriefingView] Network error loading session data:', error);
+      throw error;
+    } else {
+      // HTTP エラーの場合は再投げ
+      throw error;
+    }
   }
 };
-
 
 
 const startNewSession = () => {
@@ -385,9 +397,6 @@ const restoreSessionInfo = async () => {
 
 // Initialize
 onMounted(async () => {
-  await restoreSessionInfo();
-  loadDebriefingData();
-  
   // Load font size from localStorage
   const savedFontSize = localStorage.getItem('chatFontSize');
   if (savedFontSize) {
@@ -401,6 +410,12 @@ onMounted(async () => {
       fontSize.value = parseInt(newFontSize, 10);
     }
   });
+  
+  // Load debriefing data
+  await loadDebriefingData();
+  
+  // Try to restore session info (includes patient info)
+  await restoreSessionInfo();
 });
 </script>
 
