@@ -1,5 +1,12 @@
 <template>
-  <v-navigation-drawer v-model="localDrawer" location="right" temporary width="360">
+  <v-navigation-drawer 
+    v-model="localDrawer" 
+    location="right" 
+    temporary 
+    width="360"
+    :scrim="true"
+    @click:outside="closeDrawer"
+  >
     <v-toolbar title="操作メニュー">
       <v-spacer></v-spacer>
       <v-btn icon="mdi-close" @click="closeDrawer"></v-btn>

@@ -1,6 +1,6 @@
 <template>
-  <v-app style="height: 100vh; display: flex; flex-direction: column;">
-    <v-main style="flex: 1 1 auto; overflow: auto;">
+  <div class="debriefing-view">
+    <v-main class="debriefing-main">
       <v-container fluid class="pa-md-6 pa-4">
         <!-- Header -->
         <AppHeader 
@@ -35,7 +35,7 @@
         <div v-else-if="debriefingData" class="debriefing-content">
           <!-- Overall Score Card -->
           <v-card class="mb-6" elevation="2">
-            <v-card-title class="text-h5 font-weight-bold d-flex align-center bg-primary text-white">
+            <v-card-title class="text-h6 font-weight-bold d-flex align-center bg-primary text-white">
               <v-icon class="mr-3" size="large">mdi-star-circle</v-icon>
               総合評価（評価者: GPT-4o）
             </v-card-title>
@@ -170,7 +170,7 @@
 
     <!-- Navigation Drawer -->
     <DebriefingDrawer v-model="drawer" />
-  </v-app>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -420,6 +420,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.debriefing-view {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.debriefing-main {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
 .debriefing-content {
   max-width: 1200px;
   margin: 0 auto;
@@ -432,6 +443,25 @@ blockquote {
 
 .v-timeline {
   padding-left: 0;
+}
+
+/* スマホ対応 */
+@media screen and (max-width: 768px) {
+  .debriefing-view {
+    min-height: 100vh;
+    min-height: 100dvh; /* Dynamic viewport height */
+  }
+  
+  .debriefing-main {
+    height: calc(100vh - 64px);
+    height: calc(100dvh - 64px);
+    overflow-y: auto;
+  }
+  
+  .debriefing-content {
+    max-width: 100%;
+    margin: 0;
+  }
 }
 
 @media print {
