@@ -513,4 +513,5 @@ onMounted(async () => {
     padding-bottom: 88px !important;
   }
 }
+
 </style>

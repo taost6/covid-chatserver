@@ -14,7 +14,7 @@
         <strong>セッションID:</strong> {{ sessionId }}
       </v-card-subtitle>
       <v-divider></v-divider>
-      <v-card-text style="height: 75vh; overflow-y: auto;" class="pa-4">
+      <v-card-text class="pa-4">
         <div v-if="historyStore.isLoading" class="d-flex justify-center align-center fill-height">
           <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
         </div>
