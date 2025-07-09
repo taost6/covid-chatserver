@@ -357,15 +357,23 @@ const restoreSessionInfo = async () => {
     return;
   }
   
-  // Try to restore from localStorage (without affecting active session state)
+  // First, try to use session ID from route params
+  const sessionId = route.params.sessionId as string;
+  if (sessionId) {
+    console.log('[DebriefingView] Using session ID from route params:', sessionId);
+    await loadSessionDataFromApi(sessionId);
+    return;
+  }
+  
+  // Fallback: try to restore from localStorage
   const savedSession = localStorage.getItem('activeSession');
   if (savedSession) {
     try {
-      const { sessionId } = JSON.parse(savedSession);
-      console.log('[DebriefingView] Found saved session ID:', sessionId);
+      const { sessionId: savedSessionId } = JSON.parse(savedSession);
+      console.log('[DebriefingView] Found saved session ID:', savedSessionId);
       
-      if (sessionId) {
-        await loadSessionDataFromApi(sessionId);
+      if (savedSessionId) {
+        await loadSessionDataFromApi(savedSessionId);
       }
     } catch (error) {
       console.error('[DebriefingView] Failed to restore session info:', error);
