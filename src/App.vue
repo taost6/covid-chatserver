@@ -20,7 +20,6 @@ html, body {
   height: 100vh;
   /* スマホのUIバーを考慮した高さ設定 */
   height: 100dvh; /* Dynamic viewport height */
-  overflow: hidden;
 }
 
 /* Hide scrollbars but keep scrolling functionality */
