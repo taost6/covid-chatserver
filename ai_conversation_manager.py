@@ -119,7 +119,27 @@ class AIConversationManager:
             # 患者AIの初期メッセージを先に追加（正しい順序）
             patient_details = self.role_provider.get_patient_details(patient_id)
             patient_name = patient_details.get("name", "名無し")
-            initial_patient_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+            
+            # DBから患者AIの初期メッセージテンプレートを取得
+            try:
+                import modelDatabase
+                from modelPrompt import PromptTemplateService
+                
+                prompt_db = modelDatabase.PromptSessionLocal()
+                prompt_service = PromptTemplateService(prompt_db)
+                patient_template = prompt_service.get_active_template('patient')
+                prompt_db.close()
+                
+                if patient_template and patient_template.message_text:
+                    initial_patient_message = patient_template.message_text.replace('{patient_name}', patient_name)
+                else:
+                    # フォールバック
+                    initial_patient_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+                    self.logger.warning("Patient template message not found in DB, using fallback message")
+            except Exception as e:
+                # エラー時のフォールバック
+                initial_patient_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+                self.logger.error(f"Error loading patient template message: {e}")
             
             # 初期メッセージをセッション履歴に追加
             self.session.history.history.append(MessageInfo(role="患者", text=initial_patient_message))

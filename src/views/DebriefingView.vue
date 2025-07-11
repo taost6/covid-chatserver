@@ -57,8 +57,77 @@
             </v-card-text>
           </v-card>
 
+          <!-- Role Information Panel -->
+          <v-card v-if="sessionStore.user" class="mb-4" elevation="2">
+            <v-card-title class="text-h6 font-weight-bold d-flex align-center bg-surface-variant">
+              <v-icon class="mr-3">mdi-account-group</v-icon>
+              役割情報
+            </v-card-title>
+            <v-card-text class="pa-0">
+              <v-table density="compact" class="role-info-table">
+                <thead>
+                  <tr>
+                    <th class="text-left font-weight-bold">役割</th>
+                    <th class="text-left font-weight-bold">担当者（利用モデル）</th>
+                    <th class="text-left font-weight-bold">プロンプトバージョン</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="font-weight-bold text-primary">患者</td>
+                    <td>
+                      <span v-if="sessionStore.userRole === '患者'">
+                        {{ sessionStore.userName }}
+                      </span>
+                      <span v-else class="text-medium-emphasis">
+                        {{ modelNames?.patient_model || 'gpt-4o' }}
+                      </span>
+                    </td>
+                    <td>
+                      <span v-if="sessionStore.userRole !== '患者'">
+                        v{{ sessionVersions?.patient_version ?? 'N/A' }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="font-weight-bold text-primary">保健師</td>
+                    <td>
+                      <span v-if="sessionStore.userRole === '保健師'">
+                        {{ sessionStore.userName }}
+                      </span>
+                      <span v-else class="text-medium-emphasis">
+                        {{ modelNames?.interviewer_model || 'gpt-4o' }}
+                      </span>
+                    </td>
+                    <td>
+                      <span v-if="sessionStore.userRole !== '保健師'">
+                        v{{ sessionVersions?.interviewer_version ?? 'N/A' }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td class="font-weight-bold text-primary">評価者</td>
+                    <td>
+                      <span v-if="sessionStore.userRole === '評価者'">
+                        {{ sessionStore.userName }}
+                      </span>
+                      <span v-else class="text-medium-emphasis">
+                        {{ modelNames?.evaluator_model || 'gpt-4o' }}
+                      </span>
+                    </td>
+                    <td>
+                      <span v-if="sessionStore.userRole !== '評価者'">
+                        v{{ sessionVersions?.evaluator_version ?? 'N/A' }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </v-card-text>
+          </v-card>
+
           <!-- Patient Info Panel -->
-          <PatientInfoPanel :show-staff-info="true" />
+          <PatientInfoPanel :show-staff-info="false" />
 
           <!-- Evaluation Details -->
           <v-card class="mb-6 mt-6" elevation="2">
@@ -197,6 +266,17 @@ const error = ref<string | null>(null);
 const debriefingData = ref<DebriefingData | null>(null);
 const drawer = ref(false);
 const fontSize = ref(1);
+const sessionVersions = ref<{
+  patient_version?: number;
+  interviewer_version?: number;
+  evaluator_version?: number;
+} | null>(null);
+
+const modelNames = ref<{
+  patient_model?: string;
+  interviewer_model?: string;
+  evaluator_model?: string;
+} | null>(null);
 
 // Computed class for font size
 const fontSizeClass = computed(() => {
@@ -240,7 +320,6 @@ const loadDebriefingData = async () => {
     // Check if data is passed via route state
     if (route.params.data) {
       debriefingData.value = JSON.parse(route.params.data as string);
-      loading.value = false;
       
       // Don't load session data - use existing session info from ChatView transition
       return;
@@ -270,7 +349,8 @@ const loadDebriefingData = async () => {
     console.error('Failed to load debriefing data:', err);
     error.value = err instanceof Error ? err.message : '評価レポートの読み込みに失敗しました';
   } finally {
-    loading.value = false;
+    // loadingはセッションデータも読み込み完了後に false にする
+    // loading.value = false;
   }
 };
 
@@ -286,6 +366,7 @@ const loadSessionDataFromApi = async (sessionId: string) => {
     if (response.ok) {
       const sessionData = await response.json();
       console.log('[DebriefingView] Session data loaded from API:', sessionData);
+      console.log('[DebriefingView] Raw prompt_versions from API:', sessionData.prompt_versions);
       
       // Create mock user for evaluation page display
       const user = {
@@ -304,6 +385,33 @@ const loadSessionDataFromApi = async (sessionId: string) => {
       
       if (sessionData.interview_date) {
         sessionStore.setInterviewDate(sessionData.interview_date);
+      }
+      
+      // Set prompt versions
+      if (sessionData.prompt_versions) {
+        console.log('[DebriefingView] Setting prompt versions from API:', sessionData.prompt_versions);
+        sessionVersions.value = sessionData.prompt_versions;
+      } else {
+        console.log('[DebriefingView] No prompt_versions found in session data');
+        console.log('[DebriefingView] Full session data:', sessionData);
+        sessionVersions.value = {
+          patient_version: null,
+          interviewer_version: null,
+          evaluator_version: null
+        };
+      }
+      
+      // Set model names
+      if (sessionData.model_names) {
+        console.log('[DebriefingView] Setting model names from API:', sessionData.model_names);
+        modelNames.value = sessionData.model_names;
+      } else {
+        console.log('[DebriefingView] No model_names found in session data');
+        modelNames.value = {
+          patient_model: null,
+          interviewer_model: null,
+          evaluator_model: null
+        };
       }
       
       // Set patient info
@@ -362,12 +470,7 @@ const restoreSessionInfo = async () => {
     patient: patientStore.patientInfo,
     hasPatientInfo: patientStore.hasPatientInfo
   });
-  
-  // If stores already have user and patient data, no need to restore
-  if (sessionStore.user && patientStore.hasPatientInfo) {
-    console.log('[DebriefingView] Session already has user and patient info');
-    return;
-  }
+  console.log('[DebriefingView] Route params:', route.params);
   
   // First, try to use session ID from route params
   const sessionId = route.params.sessionId as string;
@@ -411,11 +514,16 @@ onMounted(async () => {
     }
   });
   
-  // Load debriefing data
-  await loadDebriefingData();
-  
-  // Try to restore session info (includes patient info)
-  await restoreSessionInfo();
+  try {
+    // Try to restore session info first (includes patient info and prompt versions)
+    await restoreSessionInfo();
+    
+    // Load debriefing data
+    await loadDebriefingData();
+  } finally {
+    // 両方のデータが読み込み完了後にloadingを false にする
+    loading.value = false;
+  }
 });
 </script>
 
@@ -462,6 +570,12 @@ blockquote {
     max-width: 100%;
     margin: 0;
   }
+}
+
+/* 役割情報テーブルの改行防止 */
+.role-info-table th,
+.role-info-table td {
+  white-space: nowrap;
 }
 
 @media print {

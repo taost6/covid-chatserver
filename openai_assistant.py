@@ -17,6 +17,28 @@ class OpenAIAssistantWrapper():
         thread = await self.client.beta.threads.create()
         return thread.id
 
+    async def get_assistant_info(self, assistant_id: str):
+        """
+        指定されたAssistant IDの情報を取得する
+        """
+        try:
+            logging.info(f"Retrieving assistant info for ID: {assistant_id}")
+            assistant = await self.client.beta.assistants.retrieve(assistant_id)
+            
+            result = {
+                "model": assistant.model,
+                "name": assistant.name,
+                "description": assistant.description,
+                "instructions": assistant.instructions
+            }
+            
+            logging.info(f"Successfully retrieved assistant info for {assistant_id}: model={assistant.model}, name={assistant.name}")
+            return result
+            
+        except Exception as e:
+            logging.error(f"Failed to get assistant info for {assistant_id}: {e}", exc_info=True)
+            return None
+
     async def delete_thread(self, assistant: AssistantDef):
         status = await self.client.beta.threads.delete(assistant.thread_id)
         return status

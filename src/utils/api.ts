@@ -3,7 +3,9 @@ import type {
   PatientListResponse, 
   PatientInfo, 
   SessionRestoreResponse,
-  UserRole
+  UserRole,
+  PromptTemplate,
+  PromptTemplateRequest
 } from '@/types';
 
 class ApiError extends Error {
@@ -88,6 +90,55 @@ export const api = {
     return await request(url, {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  },
+
+  // プロンプト管理API
+  async getAllPrompts(templateType?: string): Promise<PromptTemplate[]> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/prompts${templateType ? `?template_type=${templateType}` : ''}`;
+    
+    return await request<PromptTemplate[]>(url);
+  },
+
+  async getActivePrompt(templateType: string): Promise<PromptTemplate> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/prompts/${templateType}/active`;
+    
+    return await request<PromptTemplate>(url);
+  },
+
+  async createPrompt(promptData: PromptTemplateRequest): Promise<PromptTemplate> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/prompts`;
+    
+    return await request<PromptTemplate>(url, {
+      method: 'POST',
+      body: JSON.stringify(promptData),
+    });
+  },
+
+  async updatePrompt(templateId: number, promptData: PromptTemplateRequest): Promise<PromptTemplate> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/prompts/${templateId}`;
+    
+    return await request<PromptTemplate>(url, {
+      method: 'PUT',
+      body: JSON.stringify(promptData),
+    });
+  },
+
+  async activatePrompt(templateId: number): Promise<PromptTemplate> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/prompts/${templateId}/activate`;
+    
+    return await request<PromptTemplate>(url, {
+      method: 'POST',
     });
   },
 };

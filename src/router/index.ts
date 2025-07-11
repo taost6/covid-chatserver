@@ -25,6 +25,11 @@ const router = createRouter({
       component: () => import('@/views/DebriefingView.vue'),
       props: true,
     },
+    {
+      path: '/prompts',
+      name: 'prompts',
+      component: () => import('@/views/PromptManagementView.vue'),
+    },
   ],
 });
 

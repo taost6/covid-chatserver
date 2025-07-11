@@ -91,4 +91,30 @@ export interface SessionRestoreResponse {
   chat_history: ChatMessage[];
   patient_info: PatientInfo;
   interview_date: string;
+  prompt_versions?: {
+    patient_version?: number;
+    interviewer_version?: number;
+    evaluator_version?: number;
+  };
+}
+
+// プロンプト管理関連の型定義
+export type PromptTemplateType = 'patient' | 'interviewer' | 'evaluator';
+
+export interface PromptTemplate {
+  id: number;
+  template_type: PromptTemplateType;
+  version: number;
+  prompt_text: string;
+  message_text: string | null;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PromptTemplateRequest {
+  template_type: PromptTemplateType;
+  prompt_text: string;
+  message_text?: string;
+  description?: string;
 }

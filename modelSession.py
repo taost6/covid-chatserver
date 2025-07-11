@@ -18,5 +18,11 @@ class Session(Base):
     status = Column(String, default='active', nullable=False, index=True) # e.g., 'active', 'completed'
     thread_id = Column(String, nullable=True) # OpenAI Assistant thread_id
     interview_date = Column(String, nullable=True) # The date of the interview
+    patient_version = Column(Integer, nullable=True) # 使用した患者AIプロンプトのバージョン
+    interviewer_version = Column(Integer, nullable=True) # 使用した保健師AIプロンプトのバージョン
+    evaluator_version = Column(Integer, nullable=True) # 使用した評価AIプロンプトのバージョン
+    patient_model = Column(String, nullable=True) # 患者役に使用したモデル名
+    interviewer_model = Column(String, nullable=True) # 保健師役に使用したモデル名
+    evaluator_model = Column(String, nullable=True) # 評価役に使用したモデル名
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)

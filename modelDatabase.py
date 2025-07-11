@@ -6,20 +6,29 @@ import os
 
 # 新しいSessionモデルをインポート
 from modelSession import Base as SessionBase
+from modelPrompt import Base as PromptBase
 
 # これらはアプリケーション起動時に initialize_database() によって初期化されます
 engine = None
 SessionLocal = None
 Base = declarative_base()
 
+# プロンプト管理用（共通DB接続）
+prompt_engine = None
+PromptSessionLocal = None
+
 def initialize_database(db_url: str):
     """データベースエンジンとセッションファクトリを初期化します。"""
-    global engine, SessionLocal
+    global engine, SessionLocal, prompt_engine, PromptSessionLocal
     if not db_url:
         raise ValueError("データベースURLが設定されていません。データベースを初期化できません。")
     
     engine = create_engine(db_url)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    # プロンプト管理用も同じDBを使用（共通DB）
+    prompt_engine = engine
+    PromptSessionLocal = SessionLocal
 
 TABLE_SUFFIX = os.getenv("TABLE_SUFFIX", "")
 
@@ -41,6 +50,7 @@ def init_db():
     """データベーステーブルを作成します。"""
     if engine is None:
         raise RuntimeError("データベースが初期化されていません。先に initialize_database() を呼び出してください。")
-    # 両方のモデルのテーブルを作成
+    # 全てのモデルのテーブルを作成
     Base.metadata.create_all(bind=engine)
     SessionBase.metadata.create_all(bind=engine)
+    PromptBase.metadata.create_all(bind=engine)

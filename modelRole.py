@@ -212,14 +212,44 @@ class PatientRoleProvider:
         chunks = []
         
         # --- チャンク1: 基本情報と指示 ---
-        base_prompt = f"本日は{interview_date_str}です。\n"
-        base_prompt += "以下に示す情報は全て、あなたに関する設定です。\n"
-        base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
-        base_prompt += "具体的に質問されていることだけに答えてください。\n"
-        base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
-        base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
-        base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
-        base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
+        # DBから患者AIプロンプトを取得
+        try:
+            import modelDatabase
+            from modelPrompt import PromptTemplateService
+            
+            prompt_db = modelDatabase.PromptSessionLocal()
+            prompt_service = PromptTemplateService(prompt_db)
+            patient_template = prompt_service.get_active_template('patient')
+            prompt_db.close()
+            
+            if patient_template:
+                base_prompt = patient_template.prompt_text
+                # 面接日の変数を置換
+                base_prompt = base_prompt.replace('{interview_date_str}', interview_date_str)
+                base_prompt += "\n\n"
+            else:
+                # フォールバック（DBに登録されていない場合）
+                base_prompt = f"本日は{interview_date_str}です。\n"
+                base_prompt += "以下に示す情報は全て、あなたに関する設定です。\n"
+                base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
+                base_prompt += "具体的に質問されていることだけに答えてください。\n"
+                base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
+                base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
+                base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
+                base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
+                print("Warning: Patient template not found in DB, using fallback prompt")
+        except Exception as e:
+            # エラー時のフォールバック
+            base_prompt = f"本日は{interview_date_str}です。\n"
+            base_prompt += "以下に示す情報は全て、あなたに関する設定です。\n"
+            base_prompt += "これらの設定を忠実に守り、役になりきって応答してください。\n"
+            base_prompt += "具体的に質問されていることだけに答えてください。\n"
+            base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
+            base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
+            base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
+            base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
+            print(f"Error loading patient template: {e}")
+        
 
         base_info = ""
         for column_label, column_index in column_indices.items():
@@ -324,17 +354,47 @@ class PatientRoleProvider:
         """
         保健師AI用のプロンプトと初期メッセージを返す。
         """
-        prompt = (
-            "あなたは日本の自治体に所属する保健師です。\n"
-            "ユーザーは感染症に罹患した患者もしくは濃厚接触者です。\n"
-            "これからあなたには、ユーザーに対する聞き取りを行ってもらいます。\n"
-            "これは積極的疫学調査と呼ばれるもので、その中でも「聞き取り」とは、\n"
-            "感染症の発生や拡大を把握・制御するために、患者や関係者から直接情報を収集するプロセスを指します。\n"
-            "具体的には、インタビューを通じて、感染経路、接触者、症状の経過、行動履歴（いつ、どこにいったか、誰と会ったかなど）、リスク要因などを詳細に聞き出すことを意味します。\n"
-            "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
-            "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
-        )
-        initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
+        # DBから保健師AIプロンプトを取得
+        try:
+            import modelDatabase
+            from modelPrompt import PromptTemplateService
+            
+            prompt_db = modelDatabase.PromptSessionLocal()
+            prompt_service = PromptTemplateService(prompt_db)
+            interviewer_template = prompt_service.get_active_template('interviewer')
+            prompt_db.close()
+            
+            if interviewer_template:
+                prompt = interviewer_template.prompt_text
+                initial_message = interviewer_template.message_text or "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
+            else:
+                # フォールバック（DBに登録されていない場合）
+                prompt = (
+                    "あなたは日本の自治体に所属する保健師です。\n"
+                    "ユーザーは感染症に罹患した患者もしくは濃厚接触者です。\n"
+                    "これからあなたには、ユーザーに対する聞き取りを行ってもらいます。\n"
+                    "これは積極的疫学調査と呼ばれるもので、その中でも「聞き取り」とは、\n"
+                    "感染症の発生や拡大を把握・制御するために、患者や関係者から直接情報を収集するプロセスを指します。\n"
+                    "具体的には、インタビューを通じて、感染経路、接触者、症状の経過、行動履歴（いつ、どこにいったか、誰と会ったかなど）、リスク要因などを詳細に聞き出すことを意味します。\n"
+                    "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
+                    "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
+                )
+                initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
+                print("Warning: Interviewer template not found in DB, using fallback prompt")
+        except Exception as e:
+            # エラー時のフォールバック
+            prompt = (
+                "あなたは日本の自治体に所属する保健師です。\n"
+                "ユーザーは感染症に罹患した患者もしくは濃厚接触者です。\n"
+                "これからあなたには、ユーザーに対する聞き取りを行ってもらいます。\n"
+                "これは積極的疫学調査と呼ばれるもので、その中でも「聞き取り」とは、\n"
+                "感染症の発生や拡大を把握・制御するために、患者や関係者から直接情報を収集するプロセスを指します。\n"
+                "具体的には、インタビューを通じて、感染経路、接触者、症状の経過、行動履歴（いつ、どこにいったか、誰と会ったかなど）、リスク要因などを詳細に聞き出すことを意味します。\n"
+                "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
+                "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
+            )
+            initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
+            print(f"Error loading interviewer template: {e}")
         
         return [prompt], initial_message
 

@@ -88,8 +88,8 @@ const patientStore = usePatientStore();
 const panelState = ref<number | undefined>(undefined);
 
 const showPanel = computed(() => {
-  // For debriefing page with staff info, show panel if we have user or patient info
-  if (props.showStaffInfo) {
+  // For debriefing page, show panel if we have user or patient info (regardless of showStaffInfo)
+  if (props.showStaffInfo !== undefined) {
     return sessionStore.user || patientStore.hasPatientInfo;
   }
   // For regular chat page, require established session

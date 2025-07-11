@@ -10,6 +10,7 @@ import uuid
 import os
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from random import random, choice
 from hashlib import sha1
@@ -20,9 +21,13 @@ from modelHistory import *
 from modelRole import PatientRoleProvider
 import modelDatabase
 from modelSession import Session as SessionModel # New
+from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
+
+# Logger setup
+logger = logging.getLogger(__name__)
 
 class APISession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -32,6 +37,23 @@ class APISession(BaseModel):
     session_id: str
     ai_conversation_manager: Optional[Any] = None
 
+# --- Prompt Management Models ---
+class PromptTemplateRequest(BaseModel):
+    template_type: str
+    prompt_text: str
+    message_text: Optional[str] = None
+    description: Optional[str] = None
+
+class PromptTemplateResponse(BaseModel):
+    id: int
+    template_type: str
+    version: int
+    prompt_text: str
+    message_text: Optional[str]
+    description: Optional[str]
+    is_active: bool
+    created_at: datetime
+
 # --- Global State ---
 users_waiting = {}
 users_session = {}
@@ -40,6 +62,47 @@ users_session = {}
 def get_id() -> str:
     base = f"{datetime.now().timestamp()}-{random()}"
     return sha1(base.encode()).hexdigest()
+
+def get_current_prompt_versions(db: Session) -> dict:
+    """現在アクティブなプロンプトのバージョンを取得"""
+    try:
+        prompt_db = modelDatabase.PromptSessionLocal()
+        prompt_service = PromptTemplateService(prompt_db)
+        
+        versions = {}
+        for template_type in ['patient', 'interviewer', 'evaluator']:
+            template = prompt_service.get_active_template(template_type)
+            versions[f"{template_type}_version"] = template.version if template else None
+        
+        prompt_db.close()
+        return versions
+    except Exception as e:
+        logger.error(f"Failed to get current prompt versions: {e}")
+        return {"patient_version": None, "interviewer_version": None, "evaluator_version": None}
+
+async def get_assistant_model_info(assistant_id: str, oaw: OpenAIAssistantWrapper) -> str:
+    """指定されたAssistant IDのモデル情報を取得"""
+    if not assistant_id:
+        return "gpt-4o"
+    
+    if not oaw:
+        return "gpt-4o"
+    
+    try:
+        assistant_info = await oaw.get_assistant_info(assistant_id)
+        
+        if not assistant_info:
+            return "gpt-4o"
+        
+        model_name = assistant_info.get("model")
+        if not model_name:
+            return "gpt-4o"
+        
+        # 実際のモデル名を返す
+        return model_name
+        
+    except Exception as e:
+        return "gpt-4o"
 
 async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False, ai_role: str = None):
     if not modelDatabase.SessionLocal:
@@ -206,19 +269,28 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         if msg.role in ["保健師", "患者"]
     ])
     
+    # DB から評価AIプロンプトを取得
+    try:
+        prompt_db = modelDatabase.PromptSessionLocal()
+        prompt_service = PromptTemplateService(prompt_db)
+        evaluator_template = prompt_service.get_active_template('evaluator')
+        prompt_db.close()
+        
+        if evaluator_template:
+            base_prompt = evaluator_template.prompt_text
+        else:
+            # フォールバック（DBに登録されていない場合）
+            base_prompt = "あなたは保健師の聞き取りスキルを評価する専門家です。以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+            logger.warning("Evaluator template not found in DB, using fallback prompt")
+    except Exception as e:
+        # エラー時のフォールバック
+        base_prompt = "あなたは保健師の聞き取りスキルを評価する専門家です。以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+        logger.error(f"Failed to load evaluator template: {e}")
+    
     # Debriefing専用プロンプト
     debriefing_prompt = (
-        "あなたは保健師の聞き取りスキルを評価する専門家です。"
-        "以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。\n\n"
+        base_prompt + "\n\n"
         f"【対話履歴】\n{conversation_history}\n\n"
-        "評価の観点：\n"
-        "1. 感染経路の特定に関する情報収集の網羅性\n"
-        "2. 濃厚接触者の把握につながる質問の適切性\n"
-        "3. 時系列（いつ）、場所（どこで）、人物（誰と）の情報収集\n"
-        "4. 質問技法の効果性と患者への配慮\n"
-        "5. 情報の整理と確認の適切性\n\n"
-        "必ず`submit_debriefing_report`関数を呼び出して評価を提出してください。"
-        "良かったポイントは積極的に評価し、改善につながるポジティブなフィードバックをお願いします。"
     )
 
     try:
@@ -298,11 +370,32 @@ def api(config):
             logger.info("PatientRoleProvider initialized successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize PatientRoleProvider: {e}")
+            
+        # Initialize default prompts
+        if modelDatabase.PromptSessionLocal:
+            logger.info("Initializing default prompts...")
+            try:
+                db = modelDatabase.PromptSessionLocal()
+                initialize_default_prompts(db)
+                db.close()
+                logger.info("Default prompts initialized successfully.")
+            except Exception as e:
+                logger.error(f"Failed to initialize default prompts: {e}")
 
     def get_db():
         if not modelDatabase.SessionLocal:
             raise HTTPException(status_code=503, detail="Database is not initialized.")
         db = modelDatabase.SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+    
+    def get_db_for_prompts():
+        # プロンプト管理用のデータベースセッション（共通DB使用）
+        if not modelDatabase.PromptSessionLocal:
+            raise HTTPException(status_code=503, detail="Database is not initialized.")
+        db = modelDatabase.PromptSessionLocal()
         try:
             yield db
         finally:
@@ -423,6 +516,16 @@ def api(config):
             "patient_info": patient_info,
             "interview_date": db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日"),
             "debriefing_exists": debriefing_exists,
+            "prompt_versions": {
+                "patient_version": db_session.patient_version,
+                "interviewer_version": db_session.interviewer_version,
+                "evaluator_version": db_session.evaluator_version
+            },
+            "model_names": {
+                "patient_model": db_session.patient_model,
+                "interviewer_model": db_session.interviewer_model,
+                "evaluator_model": db_session.evaluator_model
+            }
         }
 
     @app.get("/v1/logs")
@@ -497,6 +600,117 @@ def api(config):
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse debriefing data for session {session_id}: {e}")
             raise HTTPException(status_code=500, detail="Failed to parse debriefing data")
+
+    # --- Prompt Management API ---
+    @app.get("/v1/prompts")
+    async def get_all_prompts(template_type: Optional[str] = None, db: Session = Depends(get_db_for_prompts)):
+        """全てのプロンプトテンプレートを取得"""        
+        service = PromptTemplateService(db)
+        templates = service.get_all_templates(template_type)
+        
+        return [
+            PromptTemplateResponse(
+                id=t.id,
+                template_type=t.template_type,
+                version=t.version,
+                prompt_text=t.prompt_text,
+                message_text=t.message_text,
+                description=t.description,
+                is_active=t.is_active,
+                created_at=t.created_at
+            ) for t in templates
+        ]
+
+    @app.get("/v1/prompts/{template_type}/active")
+    async def get_active_prompt(template_type: str, db: Session = Depends(get_db_for_prompts)):
+        """指定されたtypeのアクティブなプロンプトを取得"""
+        service = PromptTemplateService(db)
+        template = service.get_active_template(template_type)
+        
+        if not template:
+            raise HTTPException(status_code=404, detail="Active template not found")
+        
+        return PromptTemplateResponse(
+            id=template.id,
+            template_type=template.template_type,
+            version=template.version,
+            prompt_text=template.prompt_text,
+            message_text=template.message_text,
+            description=template.description,
+            is_active=template.is_active,
+            created_at=template.created_at
+        )
+
+    @app.post("/v1/prompts")
+    async def create_prompt(req: PromptTemplateRequest, db: Session = Depends(get_db_for_prompts)):
+        """新しいプロンプトテンプレートを作成"""
+        # バリデーション
+        if req.template_type not in ['patient', 'interviewer', 'evaluator']:
+            raise HTTPException(status_code=400, detail="Invalid template_type")
+        
+        service = PromptTemplateService(db)
+        template = service.create_template(
+            template_type=req.template_type,
+            prompt_text=req.prompt_text,
+            message_text=req.message_text,
+            description=req.description
+        )
+        
+        return PromptTemplateResponse(
+            id=template.id,
+            template_type=template.template_type,
+            version=template.version,
+            prompt_text=template.prompt_text,
+            message_text=template.message_text,
+            description=template.description,
+            is_active=template.is_active,
+            created_at=template.created_at
+        )
+
+    @app.put("/v1/prompts/{template_id}")
+    async def update_prompt(template_id: int, req: PromptTemplateRequest, db: Session = Depends(get_db_for_prompts)):
+        """既存のプロンプトテンプレートを更新"""
+        service = PromptTemplateService(db)
+        template = service.update_template(
+            template_id=template_id,
+            prompt_text=req.prompt_text,
+            message_text=req.message_text,
+            description=req.description
+        )
+        
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        
+        return PromptTemplateResponse(
+            id=template.id,
+            template_type=template.template_type,
+            version=template.version,
+            prompt_text=template.prompt_text,
+            message_text=template.message_text,
+            description=template.description,
+            is_active=template.is_active,
+            created_at=template.created_at
+        )
+
+    @app.post("/v1/prompts/{template_id}/activate")
+    async def activate_prompt(template_id: int, db: Session = Depends(get_db_for_prompts)):
+        """指定されたプロンプトテンプレートをアクティブにする"""
+        service = PromptTemplateService(db)
+        template = service.activate_template(template_id)
+        
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+        
+        return PromptTemplateResponse(
+            id=template.id,
+            template_type=template.template_type,
+            version=template.version,
+            prompt_text=template.prompt_text,
+            message_text=template.message_text,
+            description=template.description,
+            is_active=template.is_active,
+            created_at=template.created_at
+        )
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
@@ -599,12 +813,60 @@ def api(config):
                     if not db_session:
                         # Create a new session record in the database only if it doesn't exist
                         logger.info(f"Creating session record for session_id: {session_id}")
+                        
+                        # 現在のプロンプトバージョンを取得
+                        prompt_versions = get_current_prompt_versions(db)
+                        
+                        # モデル名を決定（人間が担当しない役割のみ）
+                        # まず、セッションに参加するAssistantを特定
+                        assistant = _find_peer_ai(user)
+                        logger.info(f"Creating session for user role: {user.role}, assistant found: {assistant is not None}")
+                        if assistant:
+                            logger.info(f"Assistant details: role={assistant.role}, assistant_id={assistant.assistant_id}")
+                        
+                        patient_model = None
+                        interviewer_model = None
+                        evaluator_model = None
+                        
+                        if user.role == "患者":
+                            # 患者が人間の場合、保健師と評価者はAI
+                            logger.info("User is patient, getting interviewer model info")
+                            interviewer_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
+                            evaluator_model = "gpt-4o"  # 評価者は別途処理
+                            logger.info(f"Set interviewer_model={interviewer_model}, evaluator_model={evaluator_model}")
+                        elif user.role == "保健師":
+                            # 保健師が人間の場合、患者と評価者はAI
+                            logger.info("User is interviewer, getting patient model info")
+                            patient_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
+                            evaluator_model = "gpt-4o"  # 評価者は別途処理
+                            logger.info(f"Set patient_model={patient_model}, evaluator_model={evaluator_model}")
+                        elif user.role == "評価者":
+                            # 評価者が人間の場合、患者と保健師はAI
+                            logger.info("User is evaluator, using default models for patient and interviewer")
+                            patient_model = "gpt-4o"  # 複数のAssistantが関わる場合は後で改善
+                            interviewer_model = "gpt-4o"
+                            logger.info(f"Set patient_model={patient_model}, interviewer_model={interviewer_model}")
+                        
+                        # バージョンも同様に、人間が担当しない役割のみ記録
+                        patient_version = None if user.role == "患者" else prompt_versions.get('patient_version')
+                        interviewer_version = None if user.role == "保健師" else prompt_versions.get('interviewer_version')
+                        evaluator_version = None if user.role == "評価者" else prompt_versions.get('evaluator_version')
+                        
+                        logger.info(f"Final session data - Models: patient={patient_model}, interviewer={interviewer_model}, evaluator={evaluator_model}")
+                        logger.info(f"Final session data - Versions: patient={patient_version}, interviewer={interviewer_version}, evaluator={evaluator_version}")
+                        
                         db_session = SessionModel(
                             session_id=session_id,
                             user_name=user.user_name,
                             user_role=user.role,
                             patient_id=user.target_patient_id if user.role in ["保健師", "傍聴者"] else None,
-                            status='active'
+                            status='active',
+                            patient_version=patient_version,
+                            interviewer_version=interviewer_version,
+                            evaluator_version=evaluator_version,
+                            patient_model=patient_model,
+                            interviewer_model=interviewer_model,
+                            evaluator_model=evaluator_model
                         )
                         db.add(db_session)
                         db.commit()
@@ -646,7 +908,24 @@ def api(config):
                             
                             patient_details = role_provider.get_patient_details(patient_id_for_ai)
                             patient_name = patient_details.get("name", "名無し")
-                            initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+                            
+                            # DBから患者AIの初期メッセージテンプレートを取得
+                            try:
+                                prompt_db = modelDatabase.PromptSessionLocal()
+                                prompt_service = PromptTemplateService(prompt_db)
+                                patient_template = prompt_service.get_active_template('patient')
+                                prompt_db.close()
+                                
+                                if patient_template and patient_template.message_text:
+                                    initial_bot_message = patient_template.message_text.replace('{patient_name}', patient_name)
+                                else:
+                                    # フォールバック
+                                    initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+                                    logger.warning("Patient template message not found in DB, using fallback message")
+                            except Exception as e:
+                                # エラー時のフォールバック
+                                initial_bot_message = f"私の名前は{patient_name}です。何でも聞いてください。"
+                                logger.error(f"Error loading patient template message: {e}")
                             history.history.append(MessageInfo(role="患者", text=initial_bot_message))
                             await log_message(db, session_id, "AI", patient_id_for_ai, user.role, "Assistant", initial_bot_message, logger, is_initial_message=True, ai_role="患者")
                         elif prompt_needed:
@@ -689,12 +968,36 @@ def api(config):
                     if not db_session:
                         # Create a new session record for observer
                         logger.info(f"Creating observer session record for session_id: {session_id}")
+                        
+                        # 現在のプロンプトバージョンを取得
+                        prompt_versions = get_current_prompt_versions(db)
+                        
+                        # 傍聴者の場合は全てのロールがAI
+                        # 実際のAssistantモデル情報を取得
+                        try:
+                            # 患者と保健師のAssistantを特定
+                            # 傍聴者モードでは複数のAssistantが関わるため、一旦デフォルト値を使用
+                            patient_model = "gpt-4o"  # 実際のAssistant情報の取得は複雑になるため、今回はデフォルト値
+                            interviewer_model = "gpt-4o"
+                            evaluator_model = "gpt-4o"
+                        except Exception as e:
+                            logger.error(f"Failed to get model info for observer session: {e}")
+                            patient_model = "gpt-4o"
+                            interviewer_model = "gpt-4o"
+                            evaluator_model = "gpt-4o"
+                        
                         db_session = SessionModel(
                             session_id=session_id,
                             user_name=user.user_name,
                             user_role=user.role,
                             patient_id=user.target_patient_id,
-                            status='active'
+                            status='active',
+                            patient_version=prompt_versions.get('patient_version'),
+                            interviewer_version=prompt_versions.get('interviewer_version'),
+                            evaluator_version=prompt_versions.get('evaluator_version'),
+                            patient_model=patient_model,
+                            interviewer_model=interviewer_model,
+                            evaluator_model=evaluator_model
                         )
                         db.add(db_session)
                         db.commit()

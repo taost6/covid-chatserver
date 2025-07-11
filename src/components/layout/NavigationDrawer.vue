@@ -235,6 +235,7 @@ const printPage = () => {
   }, 100);
 };
 
+
 // Load patient IDs when drawer opens or registration dialog opens
 watch([localDrawer, registrationDialog], async ([isDrawerOpen, isDialogOpen]) => {
   if ((isDrawerOpen || isDialogOpen) && patientStore.availablePatientIds.length === 0) {
