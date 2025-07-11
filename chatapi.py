@@ -173,7 +173,7 @@ def _find_user_session(user_id: str) -> APISession:
                 return s
     return None
 
-async def _execute_debriefing_with_specialist(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
+async def _execute_debriefing_with_specialist(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper, role_provider):
     """Debriefing専用Assistantを使用してクリーンな環境で評価を実行する"""
     
     if user.role not in ["保健師", "傍聴者"]:
@@ -252,12 +252,25 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
                             "required": ["utterance", "evaluation_symbol", "advice"]
                         }
                     },
+                    "missed_points": {
+                        "type": "array",
+                        "description": "保健師が聞き出せなかった重要なポイントのリスト。患者の設定情報（正解データ）と対話履歴を詳細に比較し、感染経路追跡や濃厚接触者特定に必要だが聞き取れなかった情報を具体的に指摘する。抽象的な指摘ではなく、実際の日付、場所、人物名、行動内容などの具体的な情報を明記すること。",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "category": {"type": "string", "description": "カテゴリ（例：発症経緯、行動履歴、接触者情報、症状詳細、感染源調査など）"},
+                                "detail": {"type": "string", "description": "具体的に聞き出せなかった情報の内容。抽象的な表現ではなく、実際の日付、時刻、場所名、人物名、行動の詳細など、患者の設定情報に含まれている具体的な事実を明記すること。例：「4月5日の午後にA店で30分間滞在したこと」「同居家族のB氏が4月3日に発熱していたこと」など。"},
+                                "importance": {"type": "string", "enum": ["高", "中", "低"], "description": "疫学調査における重要度"}
+                            },
+                            "required": ["category", "detail", "importance"]
+                        }
+                    },
                     "overall_comment": {
                         "type": "string",
                         "description": "全体的な総評。"
                     }
                 },
-                "required": ["overall_score", "information_retrieval_ratio", "information_quality", "micro_evaluations", "overall_comment"]
+                "required": ["overall_score", "information_retrieval_ratio", "information_quality", "micro_evaluations", "missed_points", "overall_comment"]
             }
         }
     }
@@ -268,6 +281,42 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         for msg in session.history.history 
         if msg.role in ["保健師", "患者"]
     ])
+    
+    # 患者の初期設定情報を取得（評価者AIが正解を知るため）
+    patient_setting_info = ""
+    try:
+        # 患者IDを特定
+        patient_id = None
+        for u in session.users:
+            if hasattr(u, 'target_patient_id') and u.target_patient_id:
+                patient_id = u.target_patient_id
+                break
+        
+        if patient_id and role_provider:
+            # 患者の詳細情報を取得
+            patient_details = role_provider.get_patient_details(patient_id)
+            if patient_details:
+                # 面接日を特定（セッション履歴から取得）
+                interview_date_str = None
+                for msg in session.history.history:
+                    if msg.role == "system" and "面接日：" in msg.text:
+                        import re
+                        match = re.search(r'面接日：(\d{4}-\d{2}-\d{2})', msg.text)
+                        if match:
+                            interview_date_str = match.group(1)
+                            break
+                
+                # 患者プロンプトの全情報を取得（評価者が正解を知るため）
+                prompt_chunks, calculated_interview_date = role_provider.get_patient_prompt_chunks(patient_id, interview_date_str)
+                patient_setting_info = "\n".join(prompt_chunks)
+                logger.info(f"Retrieved patient setting information for evaluation (patient_id: {patient_id})")
+            else:
+                logger.warning(f"Could not retrieve patient details for patient_id: {patient_id}")
+        else:
+            logger.warning("Could not determine patient_id for debriefing evaluation")
+    except Exception as e:
+        logger.error(f"Failed to retrieve patient setting information for evaluation: {e}")
+        patient_setting_info = ""
     
     # DB から評価AIプロンプトを取得
     try:
@@ -280,18 +329,47 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             base_prompt = evaluator_template.prompt_text
         else:
             # フォールバック（DBに登録されていない場合）
-            base_prompt = "あなたは保健師の聞き取りスキルを評価する専門家です。以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+            base_prompt = """あなたは保健師の聞き取りスキルを評価する専門家です。以下の患者の設定情報と対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。
+
+**重要**: 聞き出せなかったポイント(missed_points)を評価する際は、患者の設定情報（正解データ）と対話履歴を詳細に比較し、抽象的な指摘ではなく具体的な情報を明記してください。
+
+例：
+- 良い例：「4月5日の14:00-14:30にスーパーマーケットAで買い物をしたこと」
+- 悪い例：「買い物の詳細について」
+
+日付、時刻、場所名、人物名、行動の詳細など、患者データに含まれている具体的な事実を正確に記述してください。"""
             logger.warning("Evaluator template not found in DB, using fallback prompt")
     except Exception as e:
         # エラー時のフォールバック
-        base_prompt = "あなたは保健師の聞き取りスキルを評価する専門家です。以下の対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+        base_prompt = """あなたは保健師の聞き取りスキルを評価する専門家です。以下の患者の設定情報と対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。
+
+**重要**: 聞き出せなかったポイント(missed_points)を評価する際は、患者の設定情報（正解データ）と対話履歴を詳細に比較し、抽象的な指摘ではなく具体的な情報を明記してください。
+
+例：
+- 良い例：「4月5日の14:00-14:30にスーパーマーケットAで買い物をしたこと」
+- 悪い例：「買い物の詳細について」
+
+日付、時刻、場所名、人物名、行動の詳細など、患者データに含まれている具体的な事実を正確に記述してください。"""
         logger.error(f"Failed to load evaluator template: {e}")
     
-    # Debriefing専用プロンプト
-    debriefing_prompt = (
-        base_prompt + "\n\n"
-        f"【対話履歴】\n{conversation_history}\n\n"
-    )
+    # Debriefing専用プロンプト（患者設定情報を含む）
+    debriefing_prompt = base_prompt + "\n\n"
+    
+    if patient_setting_info:
+        debriefing_prompt += f"【患者の設定情報（正解データ）】\n{patient_setting_info}\n\n"
+    
+    debriefing_prompt += f"【対話履歴】\n{conversation_history}\n\n"
+    
+    # 具体的な指示を追加
+    debriefing_prompt += """
+**評価時の注意点**:
+1. 患者の設定情報と対話履歴を詳細に比較し、聞き出せなかった重要な情報を特定してください
+2. missed_pointsでは、抽象的な表現ではなく具体的な事実を記述してください
+3. 日付、時刻、場所名、人物名、行動内容などの具体的な詳細を含めてください
+4. 感染経路調査や濃厚接触者特定の観点から重要度を判定してください
+
+上記の指示に従って、詳細な評価レポートを作成してください。
+"""
 
     try:
         # 評価を実行
@@ -339,10 +417,10 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
     await log_message(db, session.session_id, user.user_name, debriefing_assistant_id, "評価者", "System", debriefing_link_message, logger)
 
 
-async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper):
+async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper, role_provider):
     """Debriefing処理を実行し、結果をクライアントに送信する"""
     # 新しい専用Assistantを使用したDebriefing処理に移行
-    await _execute_debriefing_with_specialist(session, user, db, logger, oaw)
+    await _execute_debriefing_with_specialist(session, user, db, logger, oaw, role_provider)
 
 
 # --- Main API Factory ---
@@ -748,7 +826,7 @@ def api(config):
                         active_session.users[i].ws = ws
                         break
                 # History is already in memory, so just start the handler
-                await _session_handler(user, db, logger, oaw)
+                await _session_handler(user, db, logger, oaw, role_provider)
                 return
 
             # Case 2: Restoring a session from DB (e.g., after server restart)
@@ -782,7 +860,7 @@ def api(config):
                         active_session.history.history.append(MessageInfo(role=role, text=log.message))
                     
                     logger.info(f"Restored {len(history_logs)} messages to server-side session history for session {user.session_id}.")
-                    await _session_handler(user, db, logger, oaw)
+                    await _session_handler(user, db, logger, oaw, role_provider)
                     return
 
             # Case 3: Creating a new session
@@ -797,7 +875,7 @@ def api(config):
                 
                 await peer.ws.send_json(Established(session_id=session_id).dict())
                 await user.ws.send_json(Established(session_id=session_id).dict())
-                await _session_handler(user, db, logger)
+                await _session_handler(user, db, logger, oaw, role_provider)
             else:
                 assistant = _find_peer_ai(user)
                 if assistant:
@@ -953,7 +1031,7 @@ def api(config):
 
                     final_interview_date = db_session.interview_date or db_session.created_at.strftime("%Y年%m月%d日")
                     await user.ws.send_json(Established(session_id=session_id, interview_date=final_interview_date).dict())
-                    await _session_handler(user, db, logger, oaw)
+                    await _session_handler(user, db, logger, oaw, role_provider)
                 elif user.role == "傍聴者":
                     # 傍聴者の場合はAI同士の対話を開始
                     session_id = user.session_id
@@ -1036,10 +1114,10 @@ def api(config):
                     # Start AI conversation
                     await ai_manager.start_conversation()
                     
-                    await _session_handler(user, db, logger, oaw)
+                    await _session_handler(user, db, logger, oaw, role_provider)
                 else:
                     await user.ws.send_json(Prepared().dict())
-                    await _session_handler(user, db, logger)
+                    await _session_handler(user, db, logger, oaw, role_provider)
         except WebSocketDisconnect:
             logger.debug(f"WS Exception: {user.user_id}")
         finally:
@@ -1051,7 +1129,7 @@ def api(config):
                         await u.ws.close(code=1001)
                 del users_session[session.session_id]
 
-    async def _session_handler(user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper = None):
+    async def _session_handler(user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper = None, role_provider=None):
         session = _find_user_session(user.user_id)
         if not session: return
 
@@ -1129,7 +1207,7 @@ def api(config):
                         await session.ai_conversation_manager.stop_conversation()
                         logger.info(f"AI conversation stopped for debriefing in session {session.session_id}")
                     
-                    await _execute_debriefing(session, user, db, logger, oaw)
+                    await _execute_debriefing(session, user, db, logger, oaw, role_provider)
 
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)

@@ -50,11 +50,18 @@ export interface MicroEvaluation {
   advice: string;
 }
 
+export interface MissedPoint {
+  category: string;
+  detail: string;
+  importance: '高' | '中' | '低';
+}
+
 export interface DebriefingData {
   overall_score: number;
   information_retrieval_ratio: string;
   information_quality: string;
   micro_evaluations: MicroEvaluation[];
+  missed_points: MissedPoint[];
   overall_comment: string;
   error?: string;
 }

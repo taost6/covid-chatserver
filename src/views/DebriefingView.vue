@@ -168,6 +168,49 @@
             </v-card-text>
           </v-card>
 
+          <!-- Missed Points -->
+          <v-card v-if="debriefingData.missed_points && debriefingData.missed_points.length > 0" class="mb-6" elevation="2">
+            <v-card-title class="text-h5 font-weight-bold bg-surface-variant">
+              <v-icon class="mr-3">mdi-alert-circle-outline</v-icon>
+              聞き出せなかったポイント
+            </v-card-title>
+            <v-card-text class="pa-6">
+              <v-list lines="three" class="bg-transparent">
+                <v-list-item
+                  v-for="(point, i) in debriefingData.missed_points"
+                  :key="i"
+                  class="mb-2"
+                  :style="{ borderLeft: `4px solid ${getImportanceColor(point.importance)}` }"
+                >
+                  <template v-slot:prepend>
+                    <v-icon 
+                      :color="getImportanceColor(point.importance)" 
+                      class="mr-3"
+                    >
+                      mdi-alert-circle
+                    </v-icon>
+                  </template>
+                  
+                  <v-list-item-title class="font-weight-bold">
+                    {{ point.category }}
+                    <v-chip 
+                      :color="getImportanceColor(point.importance)"
+                      size="small"
+                      variant="tonal"
+                      class="ml-2"
+                    >
+                      重要度: {{ point.importance }}
+                    </v-chip>
+                  </v-list-item-title>
+                  
+                  <v-list-item-subtitle :class="[fontSizeClass, 'mt-1']">
+                    {{ point.detail }}
+                  </v-list-item-subtitle>
+                </v-list-item>
+              </v-list>
+            </v-card-text>
+          </v-card>
+
           <!-- Micro Evaluations -->
           <v-card elevation="2">
             <v-card-title class="text-h5 font-weight-bold bg-surface-variant">
@@ -308,6 +351,16 @@ const getEvaluationColorHex = (symbol: string) => {
     case '△': return '#FF9800';
     case '✕': return '#F44336';
     default: return '#BDBDBD';
+  }
+};
+
+// Get importance color based on importance level
+const getImportanceColor = (importance: string) => {
+  switch (importance) {
+    case '高': return 'red';
+    case '中': return 'orange';
+    case '低': return 'grey';
+    default: return 'grey-lighten-1';
   }
 };
 
