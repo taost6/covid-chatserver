@@ -37,7 +37,7 @@
           <v-card class="mb-6" elevation="2">
             <v-card-title class="text-h6 font-weight-bold d-flex align-center bg-primary text-white">
               <v-icon class="mr-3" size="large">mdi-star-circle</v-icon>
-              総合評価（評価者: GPT-4o）
+              総合評価
             </v-card-title>
             <v-card-text class="pa-6">
               <div class="text-center">
@@ -448,9 +448,9 @@ const loadSessionDataFromApi = async (sessionId: string) => {
         console.log('[DebriefingView] No prompt_versions found in session data');
         console.log('[DebriefingView] Full session data:', sessionData);
         sessionVersions.value = {
-          patient_version: null,
-          interviewer_version: null,
-          evaluator_version: null
+          patient_version: undefined,
+          interviewer_version: undefined,
+          evaluator_version: undefined
         };
       }
       
@@ -461,9 +461,9 @@ const loadSessionDataFromApi = async (sessionId: string) => {
       } else {
         console.log('[DebriefingView] No model_names found in session data');
         modelNames.value = {
-          patient_model: null,
-          interviewer_model: null,
-          evaluator_model: null
+          patient_model: undefined,
+          interviewer_model: undefined,
+          evaluator_model: undefined
         };
       }
       
