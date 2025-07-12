@@ -401,11 +401,21 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
 
     finally:
         # スレッドを削除してリソースを解放
-        try:
-            await oaw.delete_thread(debriefing_thread_id)
-            logger.info(f"Deleted debriefing thread: {debriefing_thread_id}")
-        except Exception as e:
-            logger.warning(f"Failed to delete debriefing thread {debriefing_thread_id}: {e}")
+        thread_to_delete = None
+        if 'debriefing_assistant' in locals() and debriefing_assistant and debriefing_assistant.thread_id:
+            thread_to_delete = debriefing_assistant.thread_id
+            try:
+                await oaw.delete_thread(debriefing_assistant)
+                logger.info(f"Deleted debriefing thread: {thread_to_delete}")
+            except Exception as e:
+                logger.warning(f"Failed to delete debriefing thread {thread_to_delete}: {e}")
+        elif 'debriefing_thread_id' in locals() and debriefing_thread_id:
+            thread_to_delete = debriefing_thread_id
+            try:
+                await oaw.delete_thread_by_id(debriefing_thread_id)
+                logger.info(f"Deleted debriefing thread: {thread_to_delete}")
+            except Exception as e:
+                logger.warning(f"Failed to delete debriefing thread {thread_to_delete}: {e}")
 
     # 結果をクライアントに送信
     await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())

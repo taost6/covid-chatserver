@@ -43,6 +43,13 @@ class OpenAIAssistantWrapper():
         status = await self.client.beta.threads.delete(assistant.thread_id)
         return status
 
+    async def delete_thread_by_id(self, thread_id: str):
+        """thread_idから直接スレッドを削除する"""
+        if not thread_id:
+            return None
+        status = await self.client.beta.threads.delete(thread_id)
+        return status
+
     async def cancel_run(self, thread_id: str):
         try:
             runs = await self.client.beta.threads.runs.list(thread_id=thread_id, limit=10)
