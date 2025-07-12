@@ -22,6 +22,7 @@ from modelRole import PatientRoleProvider
 import modelDatabase
 from modelSession import Session as SessionModel # New
 from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
+from modelDatabase import db_retry
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
@@ -496,14 +497,23 @@ def api(config):
         return details
 
     @app.get("/v1/session/{session_id}")
-    async def get_session_status(session_id: str, db: Session = Depends(get_db)):
-        """指定されたセッションが再開可能か確認し、関連情報を返す"""
-        logger.info(f"Attempting to restore session with session_id: {session_id}") # DEBUG LOG
-        # Query the new sessions table
-        db_session = db.query(SessionModel).filter(
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    def _get_session_from_db(db: Session, session_id: str):
+        """データベースからセッション情報を取得（リトライ機能付き）"""
+        return db.query(SessionModel).filter(
             SessionModel.session_id == session_id,
             SessionModel.status == 'active'
         ).first()
+
+    async def get_session_status(session_id: str, db: Session = Depends(get_db)):
+        """指定されたセッションが再開可能か確認し、関連情報を返す"""
+        logger.info(f"Attempting to restore session with session_id: {session_id}") # DEBUG LOG
+        
+        try:
+            db_session = _get_session_from_db(db, session_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch session {session_id} from database: {e}")
+            raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")
 
         if not db_session:
             raise HTTPException(status_code=404, detail="Active session not found.")
@@ -607,14 +617,23 @@ def api(config):
         }
 
     @app.get("/v1/logs")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    def _get_sessions_from_db(db: Session):
+        """データベースからセッション一覧を取得（リトライ機能付き）"""
+        return db.query(SessionModel).order_by(
+            desc(SessionModel.created_at)
+        ).all()
+
     async def get_logs(db: Session = Depends(get_db)):
         """対話ログのセッション一覧を取得する"""
         if not modelDatabase.SessionLocal:
             raise HTTPException(status_code=503, detail="Database is not initialized.")
 
-        sessions = db.query(SessionModel).order_by(
-            desc(SessionModel.created_at)
-        ).all()
+        try:
+            sessions = _get_sessions_from_db(db)
+        except Exception as e:
+            logger.error(f"Failed to fetch sessions from database: {e}")
+            raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")
         
         return [
             {
@@ -627,16 +646,25 @@ def api(config):
         ]
 
     @app.get("/v1/logs/{session_id}")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    def _get_chat_logs_from_db(db: Session, session_id: str):
+        """データベースからチャットログを取得（リトライ機能付き）"""
+        return db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id
+        ).order_by(
+            modelDatabase.ChatLog.created_at
+        ).all()
+
     async def get_log_detail(session_id: str, db: Session = Depends(get_db)):
         """特定のセッションの対話ログ詳細を取得する"""
         if not modelDatabase.SessionLocal:
             raise HTTPException(status_code=503, detail="Database is not initialized.")
             
-        logs = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.session_id == session_id
-        ).order_by(
-            modelDatabase.ChatLog.created_at
-        ).all()
+        try:
+            logs = _get_chat_logs_from_db(db, session_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch chat logs for session {session_id}: {e}")
+            raise HTTPException(status_code=503, detail="Database connection error. Please try again later.")
         
         if not logs:
             raise HTTPException(status_code=404, detail="Session not found")
