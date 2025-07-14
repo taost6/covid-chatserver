@@ -295,4 +295,19 @@ onMounted(() => {
   font-style: italic;
   color: #475569;
 }
+
+/* Pタグのマージンを調整してwhite-space: pre-wrapとの相互作用を修正 */
+.message-text :deep(p) {
+  margin: 0;
+  padding: 0;
+}
+
+.message-text :deep(p:not(:last-child)) {
+  margin-bottom: 0.5em;
+}
+
+/* 最後のpタグは下マージンなし */
+.message-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
 </style>

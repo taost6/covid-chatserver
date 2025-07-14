@@ -1,6 +1,65 @@
 /**
- * マークダウンテキストをHTMLに変換するユーティリティ
+ * マークダウンテキストをHTMLに変換するユーティリティ（marked.js使用）
  */
+
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+// marked.jsの設定
+marked.setOptions({
+  breaks: true,        // 改行を<br>に変換
+  gfm: true,          // GitHub Flavored Markdown
+  silent: false       // エラーを隠さない
+});
+
+// カスタムレンダラーを設定
+const renderer = new marked.Renderer();
+
+// リンクのカスタム処理
+renderer.link = function(href, title, text) {
+  const titleAttr = title ? ` title="${title}"` : '';
+  if (href?.startsWith('/')) {
+    // 内部リンク
+    return `<a href="#" onclick="handleInternalLink('${href}'); return false;" class="system-link"${titleAttr}>${text}</a>`;
+  }
+  // 外部リンク
+  return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="system-link"${titleAttr}>${text}</a>`;
+};
+
+// コードブロックのカスタム処理
+renderer.code = function(code, language) {
+  return `<pre class="code-block"><code class="language-${language || ''}">${code}</code></pre>`;
+};
+
+// インラインコードのカスタム処理
+renderer.codespan = function(code) {
+  return `<code class="inline-code">${code}</code>`;
+};
+
+// 見出しのカスタム処理
+renderer.heading = function(text, level) {
+  return `<h${level} class="markdown-header">${text}</h${level}>`;
+};
+
+// リストのカスタム処理
+renderer.list = function(body, ordered) {
+  const tag = ordered ? 'ol' : 'ul';
+  return `<${tag} class="markdown-list">${body}</${tag}>`;
+};
+
+renderer.listitem = function(text) {
+  return `<li class="markdown-list-item">${text}</li>`;
+};
+
+// 引用のカスタム処理
+renderer.blockquote = function(quote) {
+  return `<blockquote class="markdown-blockquote">${quote}</blockquote>`;
+};
+
+// 水平線のカスタム処理
+renderer.hr = function() {
+  return `<hr class="markdown-hr">`;
+};
 
 // マークダウンテキストをHTMLに変換する関数
 export function processMarkdown(text: string, filterFunctionCalls: boolean = true): string {
@@ -36,75 +95,40 @@ export function processMarkdown(text: string, filterFunctionCalls: boolean = tru
     processed = text;
   }
   
-  // Escape HTML first (but preserve line breaks)
-  const escaped = processed
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-  
-  let result = escaped;
-  
-  // Convert markdown formatting to HTML
-  
-  // Bold text: **text** or __text__
-  result = result.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  result = result.replace(/__(.*?)__/g, '<strong>$1</strong>');
-  
-  // Italic text: *text* or _text_ (but not if it's part of a bold pattern)
-  result = result.replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '<em>$1</em>');
-  result = result.replace(/(?<!_)_([^_]+?)_(?!_)/g, '<em>$1</em>');
-  
-  // Code inline: `code`
-  result = result.replace(/`([^`]+?)`/g, '<code class="inline-code">$1</code>');
-  
-  // Code blocks: ```code```
-  result = result.replace(/```([\s\S]*?)```/g, '<pre class="code-block"><code>$1</code></pre>');
-  
-  // Headers: # Header, ## Header, ### Header
-  result = result.replace(/^### (.*$)/gm, '<h3 class="markdown-header">$1</h3>');
-  result = result.replace(/^## (.*$)/gm, '<h2 class="markdown-header">$1</h2>');
-  result = result.replace(/^# (.*$)/gm, '<h1 class="markdown-header">$1</h1>');
-  
-  // Handle lists separately for better control
-  
-  // First, mark bullet list items with a temporary marker
-  result = result.replace(/^[\s]*[-*+]\s+(.*)$/gm, '{{BULLET_LIST_ITEM}}$1{{/BULLET_LIST_ITEM}}');
-  
-  // Mark numbered list items with a temporary marker
-  result = result.replace(/^[\s]*\d+\.\s+(.*)$/gm, '{{NUMBERED_LIST_ITEM}}$1{{/NUMBERED_LIST_ITEM}}');
-  
-  // Convert bullet list items to HTML
-  result = result.replace(/{{BULLET_LIST_ITEM}}(.*?){{\/BULLET_LIST_ITEM}}/g, '<li class="markdown-list-item">$1</li>');
-  
-  // Convert numbered list items to HTML
-  result = result.replace(/{{NUMBERED_LIST_ITEM}}(.*?){{\/NUMBERED_LIST_ITEM}}/g, '<li class="markdown-numbered-list-item">$1</li>');
-  
-  // Wrap consecutive bullet list items in ul tags
-  result = result.replace(/((?:<li class="markdown-list-item">.*?<\/li>\s*)+)/gs, '<ul class="markdown-list">$1</ul>');
-  
-  // Wrap consecutive numbered list items in ol tags
-  result = result.replace(/((?:<li class="markdown-numbered-list-item">.*?<\/li>\s*)+)/gs, '<ol class="markdown-list">$1</ol>');
-  
-  // Links: [text](url)
-  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-  result = result.replace(linkRegex, (match, text, url) => {
-    // Handle internal routes
-    if (url.startsWith('/')) {
-      return `<a href="#" onclick="handleInternalLink('${url}'); return false;" class="system-link">${text}</a>`;
-    }
-    // Handle external links
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="system-link">${text}</a>`;
-  });
-  
-  // Blockquotes: > text
-  result = result.replace(/^&gt;\s+(.*)$/gm, '<blockquote class="markdown-blockquote">$1</blockquote>');
-  
-  // Horizontal rules: --- or ***
-  result = result.replace(/^(---|\*\*\*)$/gm, '<hr class="markdown-hr">');
-  
-  return result;
+  try {
+    // marked.jsでマークダウンをHTMLに変換
+    const html = marked(processed, { renderer });
+    
+    // DOMPurifyでサニタイズ（XSS対策）
+    let sanitized = DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        'p', 'br', 'strong', 'em', 'u', 's', 'code', 'pre', 
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'blockquote', 'hr', 'a'
+      ],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class', 'onclick'],
+      ALLOW_DATA_ATTR: false
+    });
+    
+    // marked.jsがpタグで囲む場合、末尾の不要な改行や空白を除去
+    // 単純なテキストの場合、pタグを除去して直接内容を返す
+    sanitized = sanitized
+      .replace(/^<p>(.+)<\/p>$/s, '$1')  // 単一のpタグで囲まれた場合は除去
+      .replace(/^\s+|\s+$/g, '')          // 先頭と末尾の空白文字を除去
+      .replace(/\n\s*$/g, '')             // 末尾の改行と空白を除去
+      .replace(/<\/p>\s*<p>/g, '</p><p>'); // pタグ間の不要な空白を除去
+    
+    return sanitized;
+  } catch (error) {
+    console.error('Markdown processing error:', error);
+    // エラー時はプレーンテキストを返す（HTMLエスケープ済み）
+    return processed
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 }
 
 // メッセージ用のマークダウン処理（function callフィルタリング有効）
