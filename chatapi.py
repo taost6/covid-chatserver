@@ -506,7 +506,6 @@ def api(config):
             raise HTTPException(status_code=404, detail=details['error'])
         return details
 
-    @app.get("/v1/session/{session_id}")
     @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     def _get_session_from_db(db: Session, session_id: str):
         """データベースからセッション情報を取得（リトライ機能付き）"""
@@ -515,6 +514,7 @@ def api(config):
             SessionModel.status == 'active'
         ).first()
 
+    @app.get("/v1/session/{session_id}")
     async def get_session_status(session_id: str, db: Session = Depends(get_db)):
         """指定されたセッションが再開可能か確認し、関連情報を返す"""
         logger.info(f"Attempting to restore session with session_id: {session_id}") # DEBUG LOG
@@ -626,7 +626,6 @@ def api(config):
             }
         }
 
-    @app.get("/v1/logs")
     @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     def _get_sessions_from_db(db: Session):
         """データベースからセッション一覧を取得（リトライ機能付き）"""
@@ -634,6 +633,7 @@ def api(config):
             desc(SessionModel.created_at)
         ).all()
 
+    @app.get("/v1/logs")
     async def get_logs(db: Session = Depends(get_db)):
         """対話ログのセッション一覧を取得する"""
         if not modelDatabase.SessionLocal:
@@ -655,7 +655,6 @@ def api(config):
             } for session in sessions
         ]
 
-    @app.get("/v1/logs/{session_id}")
     @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     def _get_chat_logs_from_db(db: Session, session_id: str):
         """データベースからチャットログを取得（リトライ機能付き）"""
@@ -665,6 +664,7 @@ def api(config):
             modelDatabase.ChatLog.created_at
         ).all()
 
+    @app.get("/v1/logs/{session_id}")
     async def get_log_detail(session_id: str, db: Session = Depends(get_db)):
         """特定のセッションの対話ログ詳細を取得する"""
         if not modelDatabase.SessionLocal:
