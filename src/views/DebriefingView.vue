@@ -142,7 +142,7 @@
                       <v-icon color="blue" class="mr-2">mdi-information-outline</v-icon>
                       1. 感染に関わる情報の聴取割合
                     </h4>
-                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.information_retrieval_ratio)"></div>
+                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluationWithoutQuotes(debriefingData.information_retrieval_ratio)"></div>
                   </div>
                 </v-col>
                 <v-col cols="12" md="6">
@@ -151,7 +151,7 @@
                       <v-icon color="green" class="mr-2">mdi-quality-high</v-icon>
                       2. 回答した情報の質
                     </h4>
-                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.information_quality)"></div>
+                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluationWithoutQuotes(debriefingData.information_quality)"></div>
                   </div>
                 </v-col>
               </v-row>
@@ -163,7 +163,7 @@
                   <v-icon color="orange" class="mr-2">mdi-comment-text-outline</v-icon>
                   3. 総評
                 </h4>
-                <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.overall_comment)"></div>
+                <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluationWithoutQuotes(debriefingData.overall_comment)"></div>
               </div>
             </v-card-text>
           </v-card>
@@ -203,7 +203,7 @@
                     </v-chip>
                   </v-list-item-title>
                   
-                  <v-list-item-subtitle :class="[fontSizeClass, 'mt-1', 'markdown-content']" v-html="processEvaluation(point.detail)">
+                  <v-list-item-subtitle :class="[fontSizeClass, 'mt-1', 'markdown-content']" v-html="processEvaluationWithoutQuotes(point.detail)">
                   </v-list-item-subtitle>
                 </v-list-item>
               </v-list>
@@ -240,7 +240,7 @@
                         <blockquote :class="[fontSizeClass, 'font-italic mb-3 pa-3 bg-surface-variant rounded']" style="border-left: none;">
                           "{{ item.utterance }}"
                         </blockquote>
-                        <div :class="[fontSizeClass, 'mb-0', 'markdown-content']" v-html="processEvaluation(item.advice)"></div>
+                        <div :class="[fontSizeClass, 'mb-0', 'markdown-content']" v-html="processEvaluationWithoutQuotes(item.advice)"></div>
                       </v-card-text>
                     </v-card>
                   </v-timeline-item>
@@ -294,6 +294,13 @@ import AppHeader from '@/components/layout/AppHeader.vue';
 import DebriefingDrawer from '@/components/layout/DebriefingDrawer.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
 import { processEvaluation } from '@/utils/markdown';
+
+// 評価レポート用：カギかっこを除去してからマークダウン処理
+const processEvaluationWithoutQuotes = (text: string): string => {
+  // カギかっこを除去
+  const processedText = text.replace(/「|」/g, '');
+  return processEvaluation(processedText);
+};
 import type { DebriefingData, PatientInfo } from '@/types';
 
 const route = useRoute();

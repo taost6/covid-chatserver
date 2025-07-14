@@ -19,7 +19,7 @@
           >
             {{ message.icon }}
           </v-icon>
-          <div :class="fontSizeClass" class="message-text" v-html="processMessage(message.message)"></div>
+          <div :class="fontSizeClass" class="message-text" v-html="processMessageForDisplay(message.message, message.sender)"></div>
         </div>
         <div 
           v-if="showTimestamp"
@@ -131,6 +131,23 @@ const getTimestampColor = (sender: string) => {
 const formatTimestamp = (timestamp: string) => {
   if (!timestamp) return '';
   return new Date(timestamp).toLocaleString();
+};
+
+// LLMの応答かどうかを判断
+const isLLMResponse = (sender: string) => {
+  return sender === 'assistant' || sender === 'Assistant';
+};
+
+// LLMの応答の場合はカギかっこを除去してからマークダウン処理
+const processMessageForDisplay = (message: string, sender: string): string => {
+  let processedMessage = message;
+  
+  // LLMの応答の場合、カギかっこを除去
+  if (isLLMResponse(sender)) {
+    processedMessage = processedMessage.replace(/「|」/g, '');
+  }
+  
+  return processMessage(processedMessage);
 };
 
 
