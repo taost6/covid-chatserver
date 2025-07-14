@@ -353,16 +353,16 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
 日付、時刻、場所名、人物名、行動の詳細など、患者データに含まれている具体的な事実を正確に記述してください。"""
         logger.error(f"Failed to load evaluator template: {e}")
     
-    # Debriefing専用プロンプト（患者設定情報を含む）
-    debriefing_prompt = base_prompt + "\n\n"
+    # 完全なプロンプトを作成（分割送信用）
+    full_prompt = base_prompt + "\n\n"
     
     if patient_setting_info:
-        debriefing_prompt += f"【患者の設定情報（正解データ）】\n{patient_setting_info}\n\n"
+        full_prompt += f"【患者の設定情報（正解データ）】\n{patient_setting_info}\n\n"
     
-    debriefing_prompt += f"【対話履歴】\n{conversation_history}\n\n"
+    full_prompt += f"【対話履歴】\n{conversation_history}\n\n"
     
     # 具体的な指示を追加
-    debriefing_prompt += """
+    full_prompt += """
 **評価時の注意点**:
 1. 患者の設定情報と対話履歴を詳細に比較し、聞き出せなかった重要な情報を特定してください
 2. missed_pointsでは、抽象的な表現ではなく具体的な事実を記述してください
@@ -373,12 +373,31 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
 """
 
     try:
-        # 評価を実行
+        # プロンプトを分割送信（患者AIと同じ方法）
+        prompt_chunks = role_provider._split_text_for_prompt(full_prompt, 2000)
+        logger.info(f"Split evaluator prompt into {len(prompt_chunks)} chunks for debriefing")
+        
+        # 分割されたプロンプトを順次送信
+        for i, chunk in enumerate(prompt_chunks):
+            if i == 0:
+                # 最初のチャンクは通常のメッセージとして送信
+                await oaw.add_message_to_thread(debriefing_assistant.thread_id, chunk)
+                logger.info(f"Sent evaluator prompt chunk {i+1}/{len(prompt_chunks)} to thread")
+            else:
+                # 残りのチャンクも追加のメッセージとして送信
+                await oaw.add_message_to_thread(debriefing_assistant.thread_id, chunk)
+                logger.info(f"Sent evaluator prompt chunk {i+1}/{len(prompt_chunks)} to thread")
+        
+        # 最後に評価実行指示を送信してツールを呼び出し
+        final_instruction = "上記の情報を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+        
+        # 評価を実行（レート制限対策でリトライ回数を増加）
         _, tool_call = await oaw.send_message(
             debriefing_assistant,
-            debriefing_prompt,
+            final_instruction,
             tools=[debriefing_tool],
-            tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}}
+            tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}},
+            max_retries=5  # 評価者AIは重要なので、より多くのリトライを許可
         )
 
         debriefing_data = None
@@ -1192,7 +1211,7 @@ def api(config):
                                     tools_param = [] # 患者ロールの場合は無効化
 
                                 response_msg, tool_call = await oaw.send_message(
-                                    peer, m.user_msg, tools=tools_param
+                                    peer, m.user_msg, tools=tools_param, max_retries=3
                                 )
                             except NotFoundError:
                                 logger.warning(f"Thread {peer.thread_id} not found. Recreating thread...")
@@ -1216,7 +1235,7 @@ def api(config):
                                         await oaw.add_message_to_thread(peer.thread_id, chunk)
 
                                 logger.info(f"Re-sending message to new thread {new_thread_id}")
-                                response_msg, tool_call = await oaw.send_message(peer, m.user_msg)
+                                response_msg, tool_call = await oaw.send_message(peer, m.user_msg, max_retries=3)
 
                             if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
                                 # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す
