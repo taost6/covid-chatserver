@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from modelUserDef import UserDef, AssistantDef
@@ -59,9 +60,10 @@ class AIConversationManager:
         self.nurse_ai: Optional[AssistantDef] = None
         self.patient_ai: Optional[AssistantDef] = None
         self.is_running = False
-        self.message_interval = 0.5  # 500ms
+        self.message_interval = 0.1  # 100ms - API呼び出し時間を考慮して最小限に短縮
         self.conversation_task: Optional[asyncio.Task] = None
         self.current_turn = "patient"  # "nurse" or "patient" - 保健師AIが初期メッセージを送信するので患者AIから開始
+        self.last_api_duration = 0.0  # 最後のAPI呼び出し時間
         
     async def initialize_ais(self) -> bool:
         """保健師AIと患者AIを初期化"""
@@ -229,11 +231,14 @@ class AIConversationManager:
                                 break
                     
                     if last_message and self.is_running:
+                        # API呼び出し時間を測定
+                        api_start_time = time.time()
                         response_msg, tool_call = await self.oaw.send_message(
                             current_ai, 
                             last_message,
                             tools=[] if current_ai.role == "患者" else None  # 患者AIはFunction Calling無効
                         )
+                        self.last_api_duration = time.time() - api_start_time
                     
                         if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
                             # 対話終了の確認ダイアログを送信
@@ -285,8 +290,23 @@ class AIConversationManager:
                             # 話者を切り替え
                             self.current_turn = "patient" if self.current_turn == "nurse" else "nurse"
                 
-                # 次のメッセージまで待機
-                await asyncio.sleep(self.message_interval)
+                # 次のメッセージまで待機（API応答時間に基づく動的調整）
+                # API応答が速い場合（<1秒）は最小待機、遅い場合（>3秒）はより短い待機
+                if self.last_api_duration > 0:
+                    if self.last_api_duration < 1.0:
+                        # 高速レスポンス: 最小限の待機で会話のテンポを保つ
+                        actual_interval = self.message_interval
+                    elif self.last_api_duration < 3.0:
+                        # 通常レスポンス: 標準的な待機
+                        actual_interval = self.message_interval * 0.5
+                    else:
+                        # 低速レスポンス: 待機時間を削減してテンポアップ
+                        actual_interval = max(0.05, self.message_interval * 0.2)
+                else:
+                    # APIエラーまたは未実行の場合は標準待機
+                    actual_interval = self.message_interval
+                
+                await asyncio.sleep(actual_interval)
                 
         except asyncio.CancelledError:
             self.logger.info("Conversation loop was cancelled")
