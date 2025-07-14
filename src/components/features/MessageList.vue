@@ -37,6 +37,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { processMessage } from '@/utils/markdown';
 
 interface Message {
   sender: string;
@@ -132,60 +133,6 @@ const formatTimestamp = (timestamp: string) => {
   return new Date(timestamp).toLocaleString();
 };
 
-// Process message to handle markdown links and sanitize HTML
-const processMessage = (message: string) => {
-  // Filter out function calling text
-  let filteredMessage = message;
-  
-  // Remove function calling related text patterns
-  const functionCallPatterns = [
-    /end_conversation_and_start_debriefing/g,
-    /submit_debriefing_report/g,
-    /Tool\s*call\s*detected/gi,
-    /Function\s*call/gi,
-    /\bfunction\s*:\s*\w+/gi,
-    /\btools?\s*=\s*\[?\]?/gi,
-    /\btool_choice\s*=/gi,
-    /\bassistant_id\s*=/gi,
-    /\bthread_id\s*=/gi,
-    /\buser_msg\s*=/gi,
-    /\bai_role\s*=/gi,
-    /^.*end_conversation_and_start_debriefing.*$/gm
-  ];
-  
-  functionCallPatterns.forEach(pattern => {
-    filteredMessage = filteredMessage.replace(pattern, '');
-  });
-  
-  // Clean up any extra whitespace left by filtering
-  filteredMessage = filteredMessage.replace(/\s+/g, ' ').trim();
-  
-  // If message is empty after filtering, return original message
-  if (!filteredMessage) {
-    filteredMessage = message;
-  }
-  
-  // Escape HTML first
-  const escaped = filteredMessage
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-  
-  // Convert markdown-style links [text](url) to HTML links
-  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-  const processed = escaped.replace(linkRegex, (match, text, url) => {
-    // Handle internal routes
-    if (url.startsWith('/')) {
-      return `<a href="#" onclick="handleInternalLink('${url}'); return false;" class="system-link">${text}</a>`;
-    }
-    // Handle external links
-    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="system-link">${text}</a>`;
-  });
-  
-  return processed;
-};
 
 // Setup global link handler on mount and load font size
 onMounted(() => {
@@ -257,5 +204,95 @@ onMounted(() => {
 .message-text :deep(.system-link:hover) {
   color: #1565c0;
   text-decoration: none;
+}
+
+/* Markdown styling */
+.message-text :deep(.markdown-header) {
+  margin: 0.5em 0 0.3em 0;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.message-text :deep(h1.markdown-header) {
+  font-size: 1.4em;
+  color: #1a365d;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.2em;
+}
+
+.message-text :deep(h2.markdown-header) {
+  font-size: 1.2em;
+  color: #2d3748;
+}
+
+.message-text :deep(h3.markdown-header) {
+  font-size: 1.1em;
+  color: #4a5568;
+}
+
+.message-text :deep(.markdown-list) {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+}
+
+.message-text :deep(.markdown-list-item),
+.message-text :deep(.markdown-numbered-list-item) {
+  margin: 0.2em 0;
+  line-height: 1.4;
+}
+
+.message-text :deep(.inline-code) {
+  background-color: #f1f5f9;
+  color: #e11d48;
+  padding: 0.1em 0.3em;
+  border-radius: 0.25em;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.9em;
+  border: 1px solid #e2e8f0;
+}
+
+.message-text :deep(.code-block) {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  padding: 0.8em;
+  border-radius: 0.5em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  border: 1px solid #334155;
+}
+
+.message-text :deep(.code-block code) {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.9em;
+  line-height: 1.4;
+  white-space: pre;
+}
+
+.message-text :deep(.markdown-blockquote) {
+  border-left: 4px solid #3b82f6;
+  padding-left: 1em;
+  margin: 0.5em 0;
+  font-style: italic;
+  color: #64748b;
+  background-color: #f8fafc;
+  padding: 0.8em 1em;
+  border-radius: 0 0.5em 0.5em 0;
+}
+
+.message-text :deep(.markdown-hr) {
+  border: none;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #cbd5e1, transparent);
+  margin: 1em 0;
+}
+
+.message-text :deep(strong) {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.message-text :deep(em) {
+  font-style: italic;
+  color: #475569;
 }
 </style>

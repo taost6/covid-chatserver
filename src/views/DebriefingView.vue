@@ -142,7 +142,7 @@
                       <v-icon color="blue" class="mr-2">mdi-information-outline</v-icon>
                       1. 感染に関わる情報の聴取割合
                     </h4>
-                    <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.information_retrieval_ratio }}</p>
+                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.information_retrieval_ratio)"></div>
                   </div>
                 </v-col>
                 <v-col cols="12" md="6">
@@ -151,7 +151,7 @@
                       <v-icon color="green" class="mr-2">mdi-quality-high</v-icon>
                       2. 回答した情報の質
                     </h4>
-                    <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.information_quality }}</p>
+                    <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.information_quality)"></div>
                   </div>
                 </v-col>
               </v-row>
@@ -163,7 +163,7 @@
                   <v-icon color="orange" class="mr-2">mdi-comment-text-outline</v-icon>
                   3. 総評
                 </h4>
-                <p :class="[fontSizeClass, 'pl-8']">{{ debriefingData.overall_comment }}</p>
+                <div :class="[fontSizeClass, 'pl-8', 'markdown-content']" v-html="processEvaluation(debriefingData.overall_comment)"></div>
               </div>
             </v-card-text>
           </v-card>
@@ -203,8 +203,7 @@
                     </v-chip>
                   </v-list-item-title>
                   
-                  <v-list-item-subtitle :class="[fontSizeClass, 'mt-1']">
-                    {{ point.detail }}
+                  <v-list-item-subtitle :class="[fontSizeClass, 'mt-1', 'markdown-content']" v-html="processEvaluation(point.detail)">
                   </v-list-item-subtitle>
                 </v-list-item>
               </v-list>
@@ -241,7 +240,7 @@
                         <blockquote :class="[fontSizeClass, 'font-italic mb-3 pa-3 bg-surface-variant rounded']" style="border-left: none;">
                           "{{ item.utterance }}"
                         </blockquote>
-                        <p :class="[fontSizeClass, 'mb-0']">{{ item.advice }}</p>
+                        <div :class="[fontSizeClass, 'mb-0', 'markdown-content']" v-html="processEvaluation(item.advice)"></div>
                       </v-card-text>
                     </v-card>
                   </v-timeline-item>
@@ -294,6 +293,7 @@ import { usePatientStore } from '@/stores/patientStore';
 import AppHeader from '@/components/layout/AppHeader.vue';
 import DebriefingDrawer from '@/components/layout/DebriefingDrawer.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
+import { processEvaluation } from '@/utils/markdown';
 import type { DebriefingData, PatientInfo } from '@/types';
 
 const route = useRoute();
@@ -600,6 +600,114 @@ onMounted(async () => {
 blockquote {
   border-left: 4px solid rgb(var(--v-theme-primary));
   font-style: italic;
+}
+
+/* Markdown content styling */
+.markdown-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.markdown-content :deep(.markdown-header) {
+  margin: 0.5em 0 0.3em 0;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.markdown-content :deep(h1.markdown-header) {
+  font-size: 1.3em;
+  color: #1a365d;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 0.2em;
+}
+
+.markdown-content :deep(h2.markdown-header) {
+  font-size: 1.15em;
+  color: #2d3748;
+}
+
+.markdown-content :deep(h3.markdown-header) {
+  font-size: 1.1em;
+  color: #4a5568;
+}
+
+.markdown-content :deep(.markdown-list) {
+  margin: 0.5em 0;
+  padding-left: 1.2em;
+}
+
+.markdown-content :deep(.markdown-list-item),
+.markdown-content :deep(.markdown-numbered-list-item) {
+  margin: 0.2em 0;
+  line-height: 1.4;
+}
+
+.markdown-content :deep(.inline-code) {
+  background-color: #f1f5f9;
+  color: #e11d48;
+  padding: 0.1em 0.3em;
+  border-radius: 0.25em;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.9em;
+  border: 1px solid #e2e8f0;
+}
+
+.markdown-content :deep(.code-block) {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  padding: 0.8em;
+  border-radius: 0.5em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  border: 1px solid #334155;
+}
+
+.markdown-content :deep(.code-block code) {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.9em;
+  line-height: 1.4;
+  white-space: pre;
+}
+
+.markdown-content :deep(.markdown-blockquote) {
+  border-left: 4px solid #3b82f6;
+  padding-left: 1em;
+  margin: 0.5em 0;
+  font-style: italic;
+  color: #64748b;
+  background-color: #f8fafc;
+  padding: 0.8em 1em;
+  border-radius: 0 0.5em 0.5em 0;
+}
+
+.markdown-content :deep(.markdown-hr) {
+  border: none;
+  height: 2px;
+  background: linear-gradient(to right, transparent, #cbd5e1, transparent);
+  margin: 1em 0;
+}
+
+.markdown-content :deep(strong) {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.markdown-content :deep(em) {
+  font-style: italic;
+  color: #475569;
+}
+
+.markdown-content :deep(.system-link) {
+  color: #1976d2;
+  text-decoration: underline;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.markdown-content :deep(.system-link:hover) {
+  color: #1565c0;
+  text-decoration: none;
 }
 
 .v-timeline {
