@@ -156,7 +156,8 @@ const processMessageForDisplay = (message: string | any, sender: string): string
   
   // LLMの応答の場合、カギかっこを除去
   if (isLLMResponse(sender)) {
-    processedMessage = processedMessage.replace(/「|」/g, '');
+    // より確実にカギかっこを除去
+    processedMessage = processedMessage.replace(/「/g, '').replace(/」/g, '');
   }
   
   return processMessage(processedMessage);
@@ -317,7 +318,7 @@ onMounted(() => {
 
 .message-text :deep(strong) {
   font-weight: 600;
-  color: #1e293b;
+  /* color: #1e293b; 色の変更を削除 */
 }
 
 .message-text :deep(em) {

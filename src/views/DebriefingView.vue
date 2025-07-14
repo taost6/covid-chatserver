@@ -298,7 +298,7 @@ import { processEvaluation } from '@/utils/markdown';
 // 評価レポート用：カギかっこを除去してからマークダウン処理
 const processEvaluationWithoutQuotes = (text: string): string => {
   // カギかっこを除去
-  const processedText = text.replace(/「|」/g, '');
+  const processedText = text.replace(/「/g, '').replace(/」/g, '');
   return processEvaluation(processedText);
 };
 import type { DebriefingData, PatientInfo } from '@/types';
@@ -697,7 +697,7 @@ blockquote {
 
 .markdown-content :deep(strong) {
   font-weight: 600;
-  color: #1e293b;
+  /* color: #1e293b; 色の変更を削除 */
 }
 
 .markdown-content :deep(em) {
