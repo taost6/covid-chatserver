@@ -28,8 +28,20 @@ export const useChatStore = defineStore('chat', {
 
   actions: {
     addMessage(message: ChatMessage) {
-      console.log('[ChatStore] Adding message:', message.sender, message.message.substring(0, 50));
-      this.messages.push(message);
+      // メッセージが文字列でない場合の安全な処理
+      let processedMessage: string;
+      if (typeof message.message === 'string') {
+        processedMessage = message.message;
+      } else if (message.message && typeof message.message === 'object') {
+        console.warn('[ChatStore] Received object message:', message.message);
+        processedMessage = JSON.stringify(message.message);
+      } else {
+        processedMessage = String(message.message || '');
+      }
+      
+      const safeMessage = { ...message, message: processedMessage };
+      console.log('[ChatStore] Adding message:', safeMessage.sender, safeMessage.message.substring(0, 50));
+      this.messages.push(safeMessage);
       console.log('[ChatStore] Total messages:', this.messages.length);
     },
 

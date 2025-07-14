@@ -41,7 +41,7 @@ import { processMessage } from '@/utils/markdown';
 
 interface Message {
   sender: string;
-  message: string;
+  message: string | any; // WebSocketから受信する場合、オブジェクトの可能性もある
   icon: string;
   timestamp?: string;
   created_at?: string;
@@ -139,8 +139,20 @@ const isLLMResponse = (sender: string) => {
 };
 
 // LLMの応答の場合はカギかっこを除去してからマークダウン処理
-const processMessageForDisplay = (message: string, sender: string): string => {
-  let processedMessage = message;
+const processMessageForDisplay = (message: string | any, sender: string): string => {
+  // メッセージが文字列でない場合の安全な処理
+  let processedMessage: string;
+  
+  if (typeof message === 'string') {
+    processedMessage = message;
+  } else if (message && typeof message === 'object') {
+    // オブジェクトの場合、適切な文字列表現に変換
+    console.warn('[MessageList] Received object message:', message);
+    processedMessage = JSON.stringify(message);
+  } else {
+    // その他の型の場合、文字列に変換
+    processedMessage = String(message || '');
+  }
   
   // LLMの応答の場合、カギかっこを除去
   if (isLLMResponse(sender)) {

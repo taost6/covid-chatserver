@@ -119,17 +119,28 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       case 'MessageForwarded':
         if (message.user_msg) {
+          // user_msgが文字列でない場合の安全な処理
+          let processedMessage: string;
+          if (typeof message.user_msg === 'string') {
+            processedMessage = message.user_msg;
+          } else if (message.user_msg && typeof message.user_msg === 'object') {
+            console.warn('[WebSocket] Received object message:', message.user_msg);
+            processedMessage = JSON.stringify(message.user_msg);
+          } else {
+            processedMessage = String(message.user_msg || '');
+          }
+          
           // 傍聴者の場合は、AIの発言者に応じて表示を切り替える
           if (sessionStore.userRole === '傍聴者' && (message as any).ai_role) {
             const aiRole = (message as any).ai_role;
             if (aiRole === '保健師') {
-              chatStore.addNurseAIMessage(message.user_msg);
+              chatStore.addNurseAIMessage(processedMessage);
             } else if (aiRole === '患者') {
-              chatStore.addPatientAIMessage(message.user_msg);
+              chatStore.addPatientAIMessage(processedMessage);
             }
           } else {
             chatStore.addAssistantMessage(
-              message.user_msg, 
+              processedMessage, 
               sessionStore.userRole!
             );
           }
