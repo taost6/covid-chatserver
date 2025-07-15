@@ -43,6 +43,11 @@ const historyStore = useHistoryStore();
 const sessionId = computed(() => route.params.sessionId as string);
 
 onMounted(async () => {
+  // グローバルリンクハンドラーを設定
+  (window as any).handleInternalLink = (url: string) => {
+    router.push(url);
+  };
+  
   const id = sessionId.value;
   if (id) {
     try {
@@ -82,16 +87,6 @@ const formattedMessages = computed(() => {
   return historyStore.currentSession.map(item => {
     let sender = item.sender.toLowerCase();
     
-    // システムメッセージの場合はそのまま
-    if (sender === 'system') {
-      return {
-        sender: 'system',
-        message: item.message,
-        icon: getIcon(item.sender, item.role),
-        created_at: item.created_at
-      };
-    }
-    
     // 傍聴者セッションの場合は、AIの発言を役割に応じて左右に配置
     if (item.role === '傍聴者') {
       // AIの発言の場合、ai_roleフィールドを使用して決定論的に判断
@@ -105,10 +100,11 @@ const formattedMessages = computed(() => {
         }
       }
     }
-    
+
+    // MessageListコンポーネントにそのまま渡す（処理はMessageListに委ねる）
     return {
       sender: sender,
-      message: item.message,
+      message: item.message, // 生のメッセージをそのまま渡す
       icon: getIcon(item.sender, item.role),
       created_at: item.created_at
     };

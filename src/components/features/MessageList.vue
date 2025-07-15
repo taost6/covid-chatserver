@@ -138,29 +138,40 @@ const isLLMResponse = (sender: string) => {
   return sender === 'assistant' || sender === 'Assistant';
 };
 
-// LLMの応答の場合はカギかっこを除去してからマークダウン処理
+// メッセージ表示用の処理
 const processMessageForDisplay = (message: string | any, sender: string): string => {
-  // メッセージが文字列でない場合の安全な処理
-  let processedMessage: string;
+  console.log('[MessageList] RAW INPUT:', { 
+    type: typeof message, 
+    sender, 
+    message, 
+    messageString: String(message),
+    messageJSON: JSON.stringify(message)
+  });
+  
+  // 最初に必ず文字列に変換
+  let processedMessage: string = '';
   
   if (typeof message === 'string') {
     processedMessage = message;
-  } else if (message && typeof message === 'object') {
-    // オブジェクトの場合、適切な文字列表現に変換
-    console.warn('[MessageList] Received object message:', message);
-    processedMessage = JSON.stringify(message);
+    console.log('[MessageList] Already string, using as-is');
   } else {
-    // その他の型の場合、文字列に変換
-    processedMessage = String(message || '');
+    // 文字列でない場合は強制的に文字列化
+    console.error('[MessageList] Non-string message detected, converting to string');
+    processedMessage = String(message);
+    console.log('[MessageList] Converted to string:', processedMessage);
   }
   
-  // LLMの応答の場合、カギかっこを除去
-  if (isLLMResponse(sender)) {
-    // より確実にカギかっこを除去
-    processedMessage = processedMessage.replace(/「/g, '').replace(/」/g, '');
-  }
+  console.log('[MessageList] After initial processing:', processedMessage.substring(0, 200));
   
-  return processMessage(processedMessage);
+  // カギかっこ除去処理は削除されました
+  
+  // マークダウン処理前の最終チェック
+  console.log('[MessageList] Before markdown processing:', processedMessage.substring(0, 200));
+  
+  const result = processMessage(processedMessage);
+  console.log('[MessageList] After markdown processing:', result.substring(0, 200));
+  
+  return result;
 };
 
 

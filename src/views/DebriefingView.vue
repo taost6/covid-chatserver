@@ -295,11 +295,9 @@ import DebriefingDrawer from '@/components/layout/DebriefingDrawer.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
 import { processEvaluation } from '@/utils/markdown';
 
-// 評価レポート用：カギかっこを除去してからマークダウン処理
+// 評価レポート用：マークダウン処理（カギかっこ除去処理を削除）
 const processEvaluationWithoutQuotes = (text: string): string => {
-  // カギかっこを除去
-  const processedText = text.replace(/「/g, '').replace(/」/g, '');
-  return processEvaluation(processedText);
+  return processEvaluation(text);
 };
 import type { DebriefingData, PatientInfo } from '@/types';
 

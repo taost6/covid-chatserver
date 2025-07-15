@@ -175,12 +175,24 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       case 'MessageRejected':
         if (message.reason) {
-          chatStore.addSystemMessage(`システムエラー: ${message.reason}`);
+          // reasonがオブジェクトの場合の安全な処理
+          let reasonText: string;
+          if (typeof message.reason === 'string') {
+            reasonText = message.reason;
+          } else if (message.reason && typeof message.reason === 'object') {
+            console.warn('[WebSocket] reason is object:', message.reason);
+            reasonText = JSON.stringify(message.reason);
+          } else {
+            reasonText = String(message.reason);
+          }
+          chatStore.addSystemMessage(`システムエラー: ${reasonText}`);
         }
         chatStore.setInputLocked(false);
         
         if (options.onMessageRejected) {
-          options.onMessageRejected(message.reason || 'Unknown error');
+          const reasonForCallback = typeof message.reason === 'string' ? message.reason : 
+                                   message.reason ? JSON.stringify(message.reason) : 'Unknown error';
+          options.onMessageRejected(reasonForCallback);
         }
         break;
     }
