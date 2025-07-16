@@ -329,7 +329,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
                         import re
                         match = re.search(r'面接日：(\d{4}-\d{2}-\d{2})', msg.text)
                         if match:
-                            interview_date_str = match.group(1)
+                            # 日付形式を get_patient_prompt_chunks が期待する形式に変換
+                            date_parts = match.group(1).split('-')
+                            interview_date_str = f"{date_parts[0]}年{date_parts[1]}月{date_parts[2]}日"
                             # logger.info(f"[DEBRIEFING DEBUG] Found interview_date_str: {interview_date_str}")
                             break
                 
@@ -425,9 +427,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 分割されたプロンプトを順次送信
         for i, chunk in enumerate(prompt_chunks):
-            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} START ===")
-            # logger.info(f"[DEBRIEFING DATA] {chunk}")
-            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} END ===")
+            logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} START ===")
+            logger.info(f"[DEBRIEFING DATA] {chunk}")
+            logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} END ===")
             
             if i == 0:
                 # 最初のチャンクは通常のメッセージとして送信
@@ -440,9 +442,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 最後に評価実行指示を送信してツールを呼び出し
         final_instruction = "上記の情報を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
-        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION START ===")
-        # logger.info(f"[DEBRIEFING DATA] {final_instruction}")
-        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION END ===")
+        logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION START ===")
+        logger.info(f"[DEBRIEFING DATA] {final_instruction}")
+        logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION END ===")
         
         # logger.info(f"[DEBRIEFING DEBUG] Using tool_choice: submit_debriefing_report")
         # logger.info(f"[DEBRIEFING DEBUG] Max retries set to: 5")
@@ -467,9 +469,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         debriefing_data = None
         if tool_call and tool_call.function.name == "submit_debriefing_report":
             # logger.info(f"[DEBRIEFING DEBUG] Processing tool call 'submit_debriefing_report'")
-            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
-            # logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
-            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
+            logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
+            logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
+            logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
             try:
                 args = json.loads(tool_call.function.arguments)
                 # logger.info(f"[DEBRIEFING DEBUG] JSON parsing successful")
