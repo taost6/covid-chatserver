@@ -283,40 +283,78 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         if msg.role in ["保健師", "患者"]
     ])
     
+    # デバッグログ: 対話履歴の詳細
+    # logger.info(f"[DEBRIEFING DEBUG] Session history contains {len(session.history.history)} total messages")
+    # relevant_messages = [msg for msg in session.history.history if msg.role in ["保健師", "患者"]]
+    # logger.info(f"[DEBRIEFING DEBUG] Relevant messages for evaluation: {len(relevant_messages)}")
+    
+    # for i, msg in enumerate(relevant_messages):
+    #     logger.info(f"[DEBRIEFING DEBUG] Message {i+1}: Role='{msg.role}', Length={len(msg.text)} chars")
+    #     logger.info(f"[DEBRIEFING DEBUG] Message {i+1} Content: {msg.text[:200]}{'...' if len(msg.text) > 200 else ''}")
+    
+    # logger.info(f"[DEBRIEFING DEBUG] Final conversation_history length: {len(conversation_history)} chars")
+    # logger.info(f"[DEBRIEFING DEBUG] Conversation history preview: {conversation_history[:500]}{'...' if len(conversation_history) > 500 else ''}")
+    
     # 患者の初期設定情報を取得（評価者AIが正解を知るため）
     patient_setting_info = ""
     try:
         # 患者IDを特定
         patient_id = None
-        for u in session.users:
-            if hasattr(u, 'target_patient_id') and u.target_patient_id:
-                patient_id = u.target_patient_id
-                break
+        # logger.info(f"[DEBRIEFING DEBUG] Session has {len(session.users)} users")
+        for i, u in enumerate(session.users):
+            # logger.info(f"[DEBRIEFING DEBUG] User {i+1}: type={type(u).__name__}, has_target_patient_id={hasattr(u, 'target_patient_id')}")
+            if hasattr(u, 'target_patient_id'):
+                # logger.info(f"[DEBRIEFING DEBUG] User {i+1} target_patient_id: {u.target_patient_id}")
+                if u.target_patient_id:
+                    patient_id = u.target_patient_id
+                    break
+        
+        # logger.info(f"[DEBRIEFING DEBUG] Determined patient_id: {patient_id}")
         
         if patient_id and role_provider:
             # 患者の詳細情報を取得
             patient_details = role_provider.get_patient_details(patient_id)
+            # logger.info(f"[DEBRIEFING DEBUG] Patient details retrieved: {patient_details is not None}")
             if patient_details:
+                # logger.info(f"[DEBRIEFING DEBUG] Patient details keys: {list(patient_details.keys()) if patient_details else 'None'}")
+                
                 # 面接日を特定（セッション履歴から取得）
                 interview_date_str = None
-                for msg in session.history.history:
-                    if msg.role == "system" and "面接日：" in msg.text:
+                system_messages = [msg for msg in session.history.history if msg.role == "system"]
+                # logger.info(f"[DEBRIEFING DEBUG] Found {len(system_messages)} system messages")
+                
+                for i, msg in enumerate(system_messages):
+                    # logger.info(f"[DEBRIEFING DEBUG] System message {i+1}: {msg.text[:100]}{'...' if len(msg.text) > 100 else ''}")
+                    if "面接日：" in msg.text:
                         import re
                         match = re.search(r'面接日：(\d{4}-\d{2}-\d{2})', msg.text)
                         if match:
                             interview_date_str = match.group(1)
+                            # logger.info(f"[DEBRIEFING DEBUG] Found interview_date_str: {interview_date_str}")
                             break
+                
+                # logger.info(f"[DEBRIEFING DEBUG] Final interview_date_str: {interview_date_str}")
                 
                 # 患者プロンプトの全情報を取得（評価者が正解を知るため）
                 prompt_chunks, calculated_interview_date = role_provider.get_patient_prompt_chunks(patient_id, interview_date_str)
+                # logger.info(f"[DEBRIEFING DEBUG] Patient prompt chunks: {len(prompt_chunks)} chunks")
+                # logger.info(f"[DEBRIEFING DEBUG] Calculated interview date: {calculated_interview_date}")
+                
+                # for i, chunk in enumerate(prompt_chunks):
+                #     logger.info(f"[DEBRIEFING DEBUG] Chunk {i+1} length: {len(chunk)} chars")
+                #     logger.info(f"[DEBRIEFING DEBUG] Chunk {i+1} preview: {chunk[:200]}{'...' if len(chunk) > 200 else ''}")
+                
                 patient_setting_info = "\n".join(prompt_chunks)
+                # logger.info(f"[DEBRIEFING DEBUG] Final patient_setting_info length: {len(patient_setting_info)} chars")
                 logger.info(f"Retrieved patient setting information for evaluation (patient_id: {patient_id})")
             else:
                 logger.warning(f"Could not retrieve patient details for patient_id: {patient_id}")
         else:
-            logger.warning("Could not determine patient_id for debriefing evaluation")
+            logger.warning(f"Could not determine patient_id for debriefing evaluation. patient_id={patient_id}, role_provider={role_provider is not None}")
     except Exception as e:
         logger.error(f"Failed to retrieve patient setting information for evaluation: {e}")
+        import traceback
+        # logger.error(f"[DEBRIEFING DEBUG] Full traceback: {traceback.format_exc()}")
         patient_setting_info = ""
     
     # DB から評価AIプロンプトを取得
@@ -328,6 +366,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         if evaluator_template:
             base_prompt = evaluator_template.prompt_text
+            # logger.info(f"[DEBRIEFING DEBUG] Using evaluator template from DB (version: {evaluator_template.version})")
+            # logger.info(f"[DEBRIEFING DEBUG] Base prompt length: {len(base_prompt)} chars")
+            # logger.info(f"[DEBRIEFING DEBUG] Base prompt preview: {base_prompt[:300]}{'...' if len(base_prompt) > 300 else ''}")
         else:
             # フォールバック（DBに登録されていない場合）
             base_prompt = """あなたは保健師の聞き取りスキルを評価する専門家です。以下の患者の設定情報と対話履歴を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。
@@ -358,19 +399,24 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
     
     if patient_setting_info:
         full_prompt += f"【患者の設定情報（正解データ）】\n{patient_setting_info}\n\n"
+        # logger.info(f"[DEBRIEFING DEBUG] Added patient setting info section")
+    else:
+        pass
+        # logger.warning(f"[DEBRIEFING DEBUG] No patient setting info available!")
     
     full_prompt += f"【対話履歴】\n{conversation_history}\n\n"
+    # logger.info(f"[DEBRIEFING DEBUG] Added conversation history section")
     
     # 具体的な指示を追加
-    full_prompt += """
-**評価時の注意点**:
-1. 患者の設定情報と対話履歴を詳細に比較し、聞き出せなかった重要な情報を特定してください
-2. missed_pointsでは、抽象的な表現ではなく具体的な事実を記述してください
-3. 日付、時刻、場所名、人物名、行動内容などの具体的な詳細を含めてください
-4. 感染経路調査や濃厚接触者特定の観点から重要度を判定してください
-
-上記の指示に従って、詳細な評価レポートを作成してください。
-"""
+    additional_instructions = """以上の患者の設定情報と対話履歴を詳細に比較し、詳細な評価レポートを作成してください。"""
+    full_prompt += additional_instructions
+    
+    # logger.info(f"[DEBRIEFING DEBUG] Final full_prompt length: {len(full_prompt)} chars")
+    # logger.info(f"[DEBRIEFING DEBUG] Full prompt structure analysis:")
+    # logger.info(f"[DEBRIEFING DEBUG]   - Base prompt: {len(base_prompt)} chars")
+    # logger.info(f"[DEBRIEFING DEBUG]   - Patient info: {len(patient_setting_info)} chars")
+    # logger.info(f"[DEBRIEFING DEBUG]   - Conversation: {len(conversation_history)} chars")
+    # logger.info(f"[DEBRIEFING DEBUG]   - Instructions: {len(additional_instructions)} chars")
 
     try:
         # プロンプトを分割送信（患者AIと同じ方法）
@@ -379,6 +425,10 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 分割されたプロンプトを順次送信
         for i, chunk in enumerate(prompt_chunks):
+            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} START ===")
+            # logger.info(f"[DEBRIEFING DATA] {chunk}")
+            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} END ===")
+            
             if i == 0:
                 # 最初のチャンクは通常のメッセージとして送信
                 await oaw.add_message_to_thread(debriefing_assistant.thread_id, chunk)
@@ -390,32 +440,72 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 最後に評価実行指示を送信してツールを呼び出し
         final_instruction = "上記の情報を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
+        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION START ===")
+        # logger.info(f"[DEBRIEFING DATA] {final_instruction}")
+        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION END ===")
+        
+        # logger.info(f"[DEBRIEFING DEBUG] Using tool_choice: submit_debriefing_report")
+        # logger.info(f"[DEBRIEFING DEBUG] Max retries set to: 5")
         
         # 評価を実行（レート制限対策でリトライ回数を増加）
-        _, tool_call = await oaw.send_message(
+        # logger.info(f"[DEBRIEFING DEBUG] Starting OpenAI API call for evaluation...")
+        response_text, tool_call = await oaw.send_message(
             debriefing_assistant,
             final_instruction,
             tools=[debriefing_tool],
             tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}},
             max_retries=5  # 評価者AIは重要なので、より多くのリトライを許可
         )
+        
+        # logger.info(f"[DEBRIEFING DEBUG] OpenAI API call completed")
+        # logger.info(f"[DEBRIEFING DEBUG] Response text: {response_text}")
+        # logger.info(f"[DEBRIEFING DEBUG] Tool call received: {tool_call is not None}")
+        # if tool_call:
+        #     logger.info(f"[DEBRIEFING DEBUG] Tool call function name: {tool_call.function.name}")
+        #     logger.info(f"[DEBRIEFING DEBUG] Tool call arguments length: {len(tool_call.function.arguments)} chars")
 
         debriefing_data = None
         if tool_call and tool_call.function.name == "submit_debriefing_report":
+            # logger.info(f"[DEBRIEFING DEBUG] Processing tool call 'submit_debriefing_report'")
+            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
+            # logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
+            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
             try:
                 args = json.loads(tool_call.function.arguments)
+                # logger.info(f"[DEBRIEFING DEBUG] JSON parsing successful")
+                # logger.info(f"[DEBRIEFING DEBUG] Parsed data keys: {list(args.keys()) if isinstance(args, dict) else 'Not a dict'}")
+                
+                # 各フィールドの詳細ログ
+                # if isinstance(args, dict):
+                #     logger.info(f"[DEBRIEFING DEBUG] overall_score: {args.get('overall_score', 'Missing')}")
+                #     logger.info(f"[DEBRIEFING DEBUG] micro_evaluations count: {len(args.get('micro_evaluations', [])) if 'micro_evaluations' in args else 'Missing'}")
+                #     logger.info(f"[DEBRIEFING DEBUG] missed_points count: {len(args.get('missed_points', [])) if 'missed_points' in args else 'Missing'}")
+                #     logger.info(f"[DEBRIEFING DEBUG] information_retrieval_ratio length: {len(str(args.get('information_retrieval_ratio', '')))}")
+                #     logger.info(f"[DEBRIEFING DEBUG] information_quality length: {len(str(args.get('information_quality', '')))}")
+                #     logger.info(f"[DEBRIEFING DEBUG] overall_comment length: {len(str(args.get('overall_comment', '')))}")
+                
                 debriefing_data = args
                 logger.info("Successfully parsed debriefing report from specialist assistant.")
             except (json.JSONDecodeError, KeyError) as e:
+                # logger.error(f"[DEBRIEFING DEBUG] JSON parsing failed: {e}")
+                # logger.error(f"[DEBRIEFING DEBUG] Failed to parse debriefing tool call arguments: {e}")
+                # logger.error(f"[DEBRIEFING DEBUG] Raw arguments (full): {tool_call.function.arguments}")
+                # import traceback
+                # logger.error(f"[DEBRIEFING DEBUG] Full parsing traceback: {traceback.format_exc()}")
                 logger.error(f"Failed to parse debriefing tool call arguments: {e}")
-                logger.error(f"Raw arguments: {tool_call.function.arguments}")
                 debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
         else:
+            # logger.error(f"[DEBRIEFING DEBUG] Unexpected tool call result")
+            # logger.error(f"[DEBRIEFING DEBUG] tool_call is None: {tool_call is None}")
+            # if tool_call:
+            #     logger.error(f"[DEBRIEFING DEBUG] tool_call.function.name: {getattr(tool_call.function, 'name', 'No name attribute')}")
             logger.error(f"Debriefing failed. Expected tool call 'submit_debriefing_report' but got: {tool_call}")
             debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: AIが評価データを生成できませんでした）"}
 
     except Exception as e:
-        logger.error(f"Error during debriefing execution: {e}")
+        logger.error(f"Exception during debriefing execution: {e}")
+        import traceback
+        # logger.error(f"[DEBRIEFING DEBUG] Full exception traceback: {traceback.format_exc()}")
         debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 処理中にエラーが発生しました）"}
 
     finally:
@@ -437,6 +527,13 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
                 logger.warning(f"Failed to delete debriefing thread {thread_to_delete}: {e}")
 
     # 結果をクライアントに送信
+    # logger.info(f"[DEBRIEFING DEBUG] Final debriefing_data type: {type(debriefing_data)}")
+    # logger.info(f"[DEBRIEFING DEBUG] Final debriefing_data keys: {list(debriefing_data.keys()) if isinstance(debriefing_data, dict) else 'Not a dict'}")
+    # if isinstance(debriefing_data, dict) and 'error' not in debriefing_data:
+    #     logger.info(f"[DEBRIEFING DEBUG] Successfully generated evaluation report")
+    # else:
+    #     logger.warning(f"[DEBRIEFING DEBUG] Debriefing failed or contains error")
+    
     await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
     
     # ログに保存
