@@ -37,7 +37,7 @@
                   v-if="selectedRole === '保健師' || selectedRole === '傍聴者'" 
                   v-model="selectedPatientId" 
                   :label="selectedRole === '保健師' ? '担当する患者ID' : '患者ID'" 
-                  :items="patientStore.availablePatientIds" 
+                  :items="patientStore.patientSelectItems" 
                   :rules="[rules.required]" 
                   required
                 ></v-select>
@@ -191,7 +191,7 @@ const handleRegistration = async () => {
     const userData = {
       user_name: userName.value,
       user_role: selectedRole.value,
-      target_patient_id: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? selectedPatientId.value! : undefined,
+      target_patient_id: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? String(selectedPatientId.value) : undefined,
     };
     
     const result = await api.registerUser(userData);
@@ -202,7 +202,7 @@ const handleRegistration = async () => {
         sessionId: result.session_id,
         userName: userName.value,
         userRole: selectedRole.value,
-        patientId: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? selectedPatientId.value : null,
+        patientId: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? String(selectedPatientId.value) : null,
       });
       registrationDialog.value = false;
     }
@@ -236,14 +236,16 @@ const printPage = () => {
 };
 
 
-// Load patient IDs when drawer opens or registration dialog opens
+// Load patient details when drawer opens or registration dialog opens
 watch([localDrawer, registrationDialog], async ([isDrawerOpen, isDialogOpen]) => {
-  if ((isDrawerOpen || isDialogOpen) && patientStore.availablePatientIds.length === 0) {
+  if ((isDrawerOpen || isDialogOpen) && patientStore.availablePatients.length === 0) {
     try {
-      const patientIds = await api.getPatientIds();
-      patientStore.setAvailablePatientIds(patientIds);
+      const patients = await api.getAllPatientDetails();
+      patientStore.setAvailablePatients(patients);
+      // 後方互換性のためにIDリストも設定
+      patientStore.setAvailablePatientIds(patients.map(p => p.id));
     } catch (error) {
-      console.error('Failed to load patient IDs:', error);
+      console.error('Failed to load patient details:', error);
     }
   }
 });
@@ -268,13 +270,15 @@ onMounted(async () => {
   // Show registration dialog if no established session and registration is not disabled
   registrationDialog.value = !props.disableRegistration && !sessionStore.isEstablished;
   
-  // Load patient IDs on mount if needed
-  if (!sessionStore.isEstablished && patientStore.availablePatientIds.length === 0) {
+  // Load patient details on mount if needed
+  if (!sessionStore.isEstablished && patientStore.availablePatients.length === 0) {
     try {
-      const patientIds = await api.getPatientIds();
-      patientStore.setAvailablePatientIds(patientIds);
+      const patients = await api.getAllPatientDetails();
+      patientStore.setAvailablePatients(patients);
+      // 後方互換性のためにIDリストも設定
+      patientStore.setAvailablePatientIds(patients.map(p => p.id));
     } catch (error) {
-      console.error('Failed to load patient IDs on mount:', error);
+      console.error('Failed to load patient details on mount:', error);
     }
   }
 });

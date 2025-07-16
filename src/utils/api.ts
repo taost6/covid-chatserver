@@ -64,6 +64,14 @@ export const api = {
     return await request<PatientInfo>(url);
   },
 
+  async getAllPatientDetails(): Promise<PatientInfo[]> {
+    const protocol = window.location.protocol.replace(':', '');
+    const host = window.location.host;
+    const url = `${protocol}://${host}/v1/patients/details`;
+    
+    return await request<PatientInfo[]>(url);
+  },
+
   // セッション関連API
   async restoreSession(sessionId: string): Promise<SessionRestoreResponse> {
     const protocol = window.location.protocol.replace(':', '');

@@ -263,16 +263,11 @@ class PatientRoleProvider:
         chunks.append(base_prompt + base_info)
 
         # --- チャンク2以降: 日ごとの行動履歴（調査日以前の情報のみ） ---
-        print(f"[DEBUG] Interview date: {interview_date}, interview_date.date(): {interview_date.date()}")
         for column_label, column_index in column_indices.items():
             if isinstance(column_label, datetime) and column_index != -1:
-                print(f"[DEBUG] Checking column_label: {column_label}, column_label.date(): {column_label.date()}")
                 # 調査日より後の情報は含めない（調査日当日は含む）
                 if column_label.date() > interview_date.date():
-                    print(f"[DEBUG] Skipping {column_label.date()} (after interview date)")
                     continue
-                else:
-                    print(f"[DEBUG] Including {column_label.date()} (on or before interview date)")
                 
                 value = row[column_index]
                 if pd.notna(value):

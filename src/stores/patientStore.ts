@@ -3,6 +3,7 @@ import type { PatientInfo } from '@/types';
 
 interface PatientState {
   availablePatientIds: string[];
+  availablePatients: PatientInfo[];
   selectedPatientId: string | null;
   patientInfo: PatientInfo | null;
   isLoading: boolean;
@@ -11,6 +12,7 @@ interface PatientState {
 export const usePatientStore = defineStore('patient', {
   state: (): PatientState => ({
     availablePatientIds: [],
+    availablePatients: [],
     selectedPatientId: null,
     patientInfo: null,
     isLoading: false,
@@ -25,11 +27,21 @@ export const usePatientStore = defineStore('patient', {
     
     patientAge: (state): number | null => 
       state.patientInfo?.age || null,
+    
+    patientSelectItems: (state) => 
+      state.availablePatients.map(patient => ({
+        title: `${patient.id}: ${patient.name} (${patient.age}歳 ${patient.gender})`,
+        value: patient.id
+      })),
   },
 
   actions: {
     setAvailablePatientIds(ids: string[]) {
       this.availablePatientIds = ids;
+    },
+
+    setAvailablePatients(patients: PatientInfo[]) {
+      this.availablePatients = patients;
     },
 
     setSelectedPatientId(id: string | null) {
@@ -51,6 +63,7 @@ export const usePatientStore = defineStore('patient', {
 
     reset() {
       this.availablePatientIds = [];
+      this.availablePatients = [];
       this.selectedPatientId = null;
       this.patientInfo = null;
       this.isLoading = false;

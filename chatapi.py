@@ -427,9 +427,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 分割されたプロンプトを順次送信
         for i, chunk in enumerate(prompt_chunks):
-            logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} START ===")
-            logger.info(f"[DEBRIEFING DATA] {chunk}")
-            logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} END ===")
+            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} START ===")
+            # logger.info(f"[DEBRIEFING DATA] {chunk}")
+            # logger.info(f"[DEBRIEFING DATA] === CHUNK {i+1}/{len(prompt_chunks)} END ===")
             
             if i == 0:
                 # 最初のチャンクは通常のメッセージとして送信
@@ -442,9 +442,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         
         # 最後に評価実行指示を送信してツールを呼び出し
         final_instruction = "上記の情報を分析し、`submit_debriefing_report`関数を呼び出して詳細な評価レポートを作成してください。"
-        logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION START ===")
-        logger.info(f"[DEBRIEFING DATA] {final_instruction}")
-        logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION END ===")
+        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION START ===")
+        # logger.info(f"[DEBRIEFING DATA] {final_instruction}")
+        # logger.info(f"[DEBRIEFING DATA] === FINAL INSTRUCTION END ===")
         
         # logger.info(f"[DEBRIEFING DEBUG] Using tool_choice: submit_debriefing_report")
         # logger.info(f"[DEBRIEFING DEBUG] Max retries set to: 5")
@@ -469,9 +469,9 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         debriefing_data = None
         if tool_call and tool_call.function.name == "submit_debriefing_report":
             # logger.info(f"[DEBRIEFING DEBUG] Processing tool call 'submit_debriefing_report'")
-            logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
-            logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
-            logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
+            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
+            # logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
+            # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
             try:
                 args = json.loads(tool_call.function.arguments)
                 # logger.info(f"[DEBRIEFING DEBUG] JSON parsing successful")
@@ -614,6 +614,21 @@ def api(config):
         if role_provider.df is None:
             raise HTTPException(status_code=503, detail="Patient data is not ready.")
         return {"patient_ids": role_provider.get_available_patient_ids()}
+
+    @app.get("/v1/patients/details")
+    async def get_all_patient_details():
+        if role_provider.df is None:
+            raise HTTPException(status_code=503, detail="Patient data is not ready.")
+        
+        patient_ids = role_provider.get_available_patient_ids()
+        patient_details = []
+        
+        for patient_id in patient_ids:
+            details = role_provider.get_patient_details(patient_id)
+            if "error" not in details:
+                patient_details.append(details)
+        
+        return patient_details
 
     @app.get("/v1/patient/{patient_id}")
     async def get_patient_details(patient_id: str):
