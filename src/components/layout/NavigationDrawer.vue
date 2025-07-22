@@ -41,6 +41,14 @@
                   :rules="[rules.required]" 
                   required
                 ></v-select>
+                <v-select 
+                  v-if="selectedRole === '保健師' || selectedRole === '傍聴者'" 
+                  v-model="patientUnderstanding" 
+                  label="患者AIの理解度" 
+                  :items="understandingLevels" 
+                  disabled
+                  required
+                ></v-select>
                 <div class="d-flex justify-end">
                   <v-btn type="submit" class="pa-2 elevation-2" :disabled="!formValid">開始</v-btn>
                 </div>
@@ -167,9 +175,16 @@ const formValid = ref(false);
 const userName = ref('');
 const selectedRole = ref<UserRole | null>(null);
 const selectedPatientId = ref<string | null>(null);
+const patientUnderstanding = ref<string>('高');
 const fontSize = ref(1);
 const submitWithEnter = ref(true);
 const submitThenClear = ref(true);
+
+const understandingLevels = [
+  { title: '高', value: '高' },
+  { title: '中', value: '中' },  
+  { title: '低', value: '低' }
+];
 
 const rules = {
   required: (value: string) => !!value || '必須項目です',
