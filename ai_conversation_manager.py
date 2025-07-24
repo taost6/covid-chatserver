@@ -147,8 +147,8 @@ class AIConversationManager:
             self.session.history.history.append(MessageInfo(role="患者", text=initial_patient_message))
             await log_message(self.db, self.session.session_id, "AI", patient_id, "傍聴者", "Assistant", initial_patient_message, self.logger, is_initial_message=True, ai_role="患者")
             
-            # 保健師AIのプロンプト設定
-            interviewer_chunks, initial_nurse_message = self.role_provider.get_interviewer_prompt_chunks()
+            # 保健師AIのプロンプト設定（患者AIと同じ調査日を渡す）
+            interviewer_chunks, initial_nurse_message = self.role_provider.get_interviewer_prompt_chunks(interview_date_str)
             for chunk in interviewer_chunks:
                 await self.oaw.add_message_to_thread(self.nurse_ai.thread_id, chunk)
                 self.session.history.history.append(MessageInfo(role="system", text=chunk))

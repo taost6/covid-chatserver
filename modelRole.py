@@ -350,9 +350,10 @@ class PatientRoleProvider:
         return details
 
 
-    def get_interviewer_prompt_chunks(self) -> (List[str], str):
+    def get_interviewer_prompt_chunks(self, interview_date_str: str = None) -> (List[str], str):
         """
         保健師AI用のプロンプトと初期メッセージを返す。
+        interview_date_str: 傍聴者モード時に調査日情報を追加するための日付文字列
         """
         # DBから保健師AIプロンプトを取得
         try:
@@ -366,6 +367,9 @@ class PatientRoleProvider:
             
             if interviewer_template:
                 prompt = interviewer_template.prompt_text
+                # 傍聴者モード時に日付情報を追加
+                if interview_date_str:
+                    prompt = f"本日は{interview_date_str}です。\n\n" + prompt
                 initial_message = interviewer_template.message_text or "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
             else:
                 # フォールバック（DBに登録されていない場合）
@@ -379,6 +383,9 @@ class PatientRoleProvider:
                     "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
                     "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
                 )
+                # 傍聴者モード時に日付情報を追加
+                if interview_date_str:
+                    prompt = f"本日は{interview_date_str}です。\n\n" + prompt
                 initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
                 print("Warning: Interviewer template not found in DB, using fallback prompt")
         except Exception as e:
@@ -393,6 +400,9 @@ class PatientRoleProvider:
                 "これらを踏まえた上で、感染経路の特定や、濃厚接触者の把握に役立ちそうな情報を深堀りして、有益な情報を引き出してください。\n"
                 "ユーザーに対する質問は一回につき一つまでとし、回答しやすい質問を心がけてください。"
             )
+            # 傍聴者モード時に日付情報を追加
+            if interview_date_str:
+                prompt = f"本日は{interview_date_str}です。\n\n" + prompt
             initial_message = "はじめまして。私は保健師です。\nこれから感染状況に関する質問をさせてください。\n今の体調はいかがでしょうか？"
             print(f"Error loading interviewer template: {e}")
         
