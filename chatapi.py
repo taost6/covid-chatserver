@@ -84,26 +84,31 @@ def get_current_prompt_versions(db: Session) -> dict:
 async def get_assistant_model_info(assistant_id: str, oaw: OpenAIAssistantWrapper) -> str:
     """指定されたAssistant IDのモデル情報を取得"""
     if not assistant_id:
-        return "gpt-4o"
+        logger.error("Assistant ID is missing")
+        raise ValueError("Assistant ID is required")
     
     if not oaw:
-        return "gpt-4o"
+        logger.error("OpenAI Assistant Wrapper is not available")
+        raise ValueError("OpenAI Assistant Wrapper is required")
     
     try:
         assistant_info = await oaw.get_assistant_info(assistant_id)
         
         if not assistant_info:
-            return "gpt-4o"
+            logger.error(f"No assistant info found for ID: {assistant_id}")
+            raise ValueError(f"Assistant info not found for ID: {assistant_id}")
         
         model_name = assistant_info.get("model")
         if not model_name:
-            return "gpt-4o"
+            logger.error(f"No model name found in assistant info for ID: {assistant_id}")
+            raise ValueError(f"Model name not found for assistant ID: {assistant_id}")
         
-        # 実際のモデル名を返す
+        logger.info(f"Retrieved model name '{model_name}' for assistant ID: {assistant_id}")
         return model_name
         
     except Exception as e:
-        return "gpt-4o"
+        logger.error(f"Failed to get assistant model info for ID {assistant_id}: {e}")
+        raise
 
 async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False, ai_role: str = None):
     if not modelDatabase.SessionLocal:
@@ -218,6 +223,21 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         assistant_id=debriefing_assistant_id,
         thread_id=debriefing_thread_id
     )
+
+    # 実際の評価AIモデル情報を取得してデータベースに保存
+    try:
+        evaluator_model = await get_assistant_model_info(debriefing_assistant_id, oaw)
+        # セッションレコードを更新
+        db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+        if db_session:
+            db_session.evaluator_model = evaluator_model
+            db.commit()
+            logger.info(f"Updated session {session.session_id} with actual evaluator_model: {evaluator_model}")
+        else:
+            logger.error(f"Session {session.session_id} not found in database for evaluator model update")
+    except Exception as e:
+        logger.error(f"Failed to get/update evaluator model info for {debriefing_assistant_id}: {e}")
+        # Continue with debriefing even if model info retrieval fails
 
     # Function Calling用のツール定義
     debriefing_tool = {
@@ -1080,20 +1100,63 @@ def api(config):
                         if user.role == "患者":
                             # 患者が人間の場合、保健師と評価者はAI
                             logger.info("User is patient, getting interviewer model info")
-                            interviewer_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
-                            evaluator_model = "gpt-4o"  # 評価者は別途処理
+                            try:
+                                interviewer_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
+                            except Exception as e:
+                                logger.error(f"Failed to get interviewer model info: {e}")
+                                interviewer_model = "UNKNOWN_MODEL"
+                            # 評価者AIのモデル情報も取得
+                            try:
+                                with open("assistants.json", "r") as f:
+                                    assistants = json.load(f)
+                                if len(assistants) >= 3:
+                                    evaluator_assistant_id = assistants[2]
+                                    evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
+                                else:
+                                    evaluator_model = "EVALUATOR_CONFIG_ERROR"
+                            except Exception as e:
+                                logger.error(f"Failed to get evaluator model info: {e}")
+                                evaluator_model = "EVALUATOR_ERROR"
                             logger.info(f"Set interviewer_model={interviewer_model}, evaluator_model={evaluator_model}")
                         elif user.role == "保健師":
                             # 保健師が人間の場合、患者と評価者はAI
                             logger.info("User is interviewer, getting patient model info")
-                            patient_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
-                            evaluator_model = "gpt-4o"  # 評価者は別途処理
+                            try:
+                                patient_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
+                            except Exception as e:
+                                logger.error(f"Failed to get patient model info: {e}")
+                                patient_model = "UNKNOWN_MODEL"
+                            # 評価者AIのモデル情報も取得
+                            try:
+                                with open("assistants.json", "r") as f:
+                                    assistants = json.load(f)
+                                if len(assistants) >= 3:
+                                    evaluator_assistant_id = assistants[2]
+                                    evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
+                                else:
+                                    evaluator_model = "EVALUATOR_CONFIG_ERROR"
+                            except Exception as e:
+                                logger.error(f"Failed to get evaluator model info: {e}")
+                                evaluator_model = "EVALUATOR_ERROR"
                             logger.info(f"Set patient_model={patient_model}, evaluator_model={evaluator_model}")
                         elif user.role == "評価者":
                             # 評価者が人間の場合、患者と保健師はAI
-                            logger.info("User is evaluator, using default models for patient and interviewer")
-                            patient_model = "gpt-4o"  # 複数のAssistantが関わる場合は後で改善
-                            interviewer_model = "gpt-4o"
+                            logger.info("User is evaluator, getting model info for patient and interviewer")
+                            try:
+                                with open("assistants.json", "r") as f:
+                                    assistants = json.load(f)
+                                if len(assistants) >= 2:
+                                    patient_assistant_id = assistants[0]
+                                    interviewer_assistant_id = assistants[1]
+                                    patient_model = await get_assistant_model_info(patient_assistant_id, oaw)
+                                    interviewer_model = await get_assistant_model_info(interviewer_assistant_id, oaw)
+                                else:
+                                    patient_model = "PATIENT_CONFIG_ERROR"
+                                    interviewer_model = "INTERVIEWER_CONFIG_ERROR"
+                            except Exception as e:
+                                logger.error(f"Failed to get model info for evaluator session: {e}")
+                                patient_model = "PATIENT_ERROR"
+                                interviewer_model = "INTERVIEWER_ERROR"
                             logger.info(f"Set patient_model={patient_model}, interviewer_model={interviewer_model}")
                         
                         # バージョンも同様に、人間が担当しない役割のみ記録
@@ -1224,16 +1287,31 @@ def api(config):
                         # 傍聴者の場合は全てのロールがAI
                         # 実際のAssistantモデル情報を取得
                         try:
-                            # 患者と保健師のAssistantを特定
-                            # 傍聴者モードでは複数のAssistantが関わるため、一旦デフォルト値を使用
-                            patient_model = "gpt-4o"  # 実際のAssistant情報の取得は複雑になるため、今回はデフォルト値
-                            interviewer_model = "gpt-4o"
-                            evaluator_model = "gpt-4o"
+                            # assistants.jsonから実際のAssistant IDを取得
+                            with open("assistants.json", "r") as f:
+                                assistants = json.load(f)
+                            
+                            if len(assistants) >= 3:
+                                patient_assistant_id = assistants[0]  # 1番目: 患者AI
+                                interviewer_assistant_id = assistants[1]  # 2番目: 保健師AI
+                                evaluator_assistant_id = assistants[2]  # 3番目: 評価者AI
+                                
+                                # 各AIの実際のモデル情報を取得
+                                patient_model = await get_assistant_model_info(patient_assistant_id, oaw)
+                                interviewer_model = await get_assistant_model_info(interviewer_assistant_id, oaw)
+                                evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
+                                
+                                logger.info(f"Observer session models - patient: {patient_model}, interviewer: {interviewer_model}, evaluator: {evaluator_model}")
+                            else:
+                                logger.error("Not enough assistants defined in assistants.json for observer mode")
+                                patient_model = "ASSISTANT_CONFIG_ERROR"
+                                interviewer_model = "ASSISTANT_CONFIG_ERROR" 
+                                evaluator_model = "ASSISTANT_CONFIG_ERROR"
                         except Exception as e:
                             logger.error(f"Failed to get model info for observer session: {e}")
-                            patient_model = "gpt-4o"
-                            interviewer_model = "gpt-4o"
-                            evaluator_model = "gpt-4o"
+                            patient_model = "MODEL_RETRIEVAL_ERROR"
+                            interviewer_model = "MODEL_RETRIEVAL_ERROR"
+                            evaluator_model = "MODEL_RETRIEVAL_ERROR"
                         
                         db_session = SessionModel(
                             session_id=session_id,

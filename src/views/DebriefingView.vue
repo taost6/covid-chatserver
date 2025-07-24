@@ -80,7 +80,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.patient_model || 'gpt-4o' }}
+                        {{ modelNames?.patient_model || 'モデル情報取得エラー' }}
                       </span>
                     </td>
                     <td>
@@ -96,7 +96,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.interviewer_model || 'gpt-4o' }}
+                        {{ modelNames?.interviewer_model || 'モデル情報取得エラー' }}
                       </span>
                     </td>
                     <td>
@@ -112,7 +112,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.evaluator_model || 'gpt-4o' }}
+                        {{ modelNames?.evaluator_model || 'モデル情報取得エラー' }}
                       </span>
                     </td>
                     <td>
