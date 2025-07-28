@@ -282,20 +282,46 @@ class PatientRoleProvider:
                         for sub_chunk in sub_chunks:
                             chunks.append(header + sub_chunk)
 
-        # --- 最終チャンク: IDと名前の対応表と指示 ---
-        id_name_map = []
+        # --- 最終チャンク: IDと名前と発症日の対応表と指示 ---
+        id_name_onset_map = []
         id_idx = column_indices.get("ID")
         name_idx = column_indices.get("氏名")
+        onset_idx = column_indices.get("発症日")
+        
         if id_idx != -1 and name_idx != -1:
             for r in self.df.values:
                 if pd.notna(r[id_idx]) and pd.notna(r[name_idx]):
-                    id_name_map.append({"ID": int(r[id_idx]), "name": r[name_idx]})
-        
-        id_name_json = json.dumps(id_name_map, ensure_ascii=False)
+                    patient_data = {"ID": int(r[id_idx]), "name": r[name_idx]}
+                    
+                    # 発症日情報を追加（調査日以前のみ）
+                    if onset_idx != -1 and pd.notna(r[onset_idx]):
+                        onset_date_str = str(r[onset_idx]).strip()
+                        if onset_date_str and onset_date_str != "不明":
+                            try:
+                                onset_date = pd.to_datetime(onset_date_str)
+                                if not pd.isna(onset_date):
+                                    # 調査日以前（調査日含む）の発症日のみ追加
+                                    if onset_date.date() <= interview_date.date():
+                                        patient_data["onset_date"] = onset_date.strftime("%Y年%m月%d日")
+                                    else:
+                                        patient_data["onset_date"] = "不明"
+                                else:
+                                    patient_data["onset_date"] = "不明"
+                            except:
+                                patient_data["onset_date"] = "不明"
+                        else:
+                            patient_data["onset_date"] = "不明"
+                    else:
+                        patient_data["onset_date"] = "不明"
+                    
+                    id_name_onset_map.append(patient_data)
+
+        id_name_onset_json = json.dumps(id_name_onset_map, ensure_ascii=False)
         final_instruction = (
-            "以下に示す情報は、患者IDと名前の対応を表しています。"
+            "以下に示す情報は、患者IDと名前と発症日の対応を表しています。"
             "ここまでの情報の中に、ID:3などのようにIDが含まれている場合、ユーザーに言及された場合は患者IDをそのまま答えるのではなく、名前に変換してから回答するようにしてください。"
-            f"{id_name_json}"
+            "また、他の患者の発症日について質問された場合は、この情報を参考にしてください。"
+            f"{id_name_onset_json}"
         )
         chunks.append(final_instruction)
 
