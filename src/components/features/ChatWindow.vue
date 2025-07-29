@@ -29,6 +29,30 @@
       
       <v-card-text id="chat-history-container" ref="chatContainer">
         <MessageList :messages="chatStore.messages" />
+        
+        <!-- Rate Limit Message -->
+        <div v-if="chatStore.rateLimitMessage?.isVisible" class="mt-4">
+          <v-alert
+            type="warning"
+            variant="tonal"
+            class="ma-2"
+            border="start"
+            :title="`API制限による待機中 (残り${chatStore.rateLimitMessage.remainingSeconds}秒)`"
+            :text="chatStore.rateLimitMessage.message"
+            icon="mdi-clock-outline"
+          >
+            <template v-slot:append>
+              <v-progress-circular
+                :model-value="rateLimitProgress"
+                size="32"
+                width="4"
+                color="warning"
+              >
+                {{ chatStore.rateLimitMessage.remainingSeconds }}
+              </v-progress-circular>
+            </template>
+          </v-alert>
+        </div>
       </v-card-text>
     </v-card>
   </div>
@@ -49,6 +73,14 @@ const chatStore = useChatStore();
 const { scrollToBottom: smoothScrollToBottom } = useScrollToBottom();
 
 const chatContainer = ref<HTMLElement>();
+
+// Rate limit progress calculation
+const rateLimitProgress = computed(() => {
+  if (!chatStore.rateLimitMessage) return 0;
+  const { remainingSeconds, totalSeconds } = chatStore.rateLimitMessage;
+  const elapsed = totalSeconds - remainingSeconds;
+  return totalSeconds > 0 ? (elapsed / totalSeconds) * 100 : 0;
+});
 
 const scrollToBottom = async () => {
   console.log('[ChatWindow] scrollToBottom called');

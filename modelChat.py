@@ -80,6 +80,7 @@ class MsgType(Enum):
     ToolCallDetected = 8
     ContinueConversationRequest = 9
     ConversationContinueAccepted = 10
+    RateLimitWaitNotification = 11
     MessageSubmitted = 201
     MessageForwarded = 202
     MessageRejected = 203
@@ -188,6 +189,12 @@ class ContinueConversationRequest(BaseModel):
 class ConversationContinueAccepted(BaseModel):
     msg_type: str=MsgType.ConversationContinueAccepted.name
     session_id: str
+    
+class RateLimitWaitNotification(BaseModel):
+    msg_type: str=MsgType.RateLimitWaitNotification.name
+    session_id: str
+    wait_seconds: int
+    message: str
 
 if __name__ == "__main__":
     RegistrationRequest.model_validate({

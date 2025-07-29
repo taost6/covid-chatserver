@@ -11,6 +11,7 @@ interface WebSocketOptions {
   onToolCallDetected?: () => void;
   onConversationContinueAccepted?: () => void;
   onMessageRejected?: (reason: string) => void;
+  onRateLimitWait?: (data: { wait_seconds: number; message: string }) => void;
 }
 
 export function useWebSocket(options: WebSocketOptions = {}) {
@@ -193,6 +194,15 @@ export function useWebSocket(options: WebSocketOptions = {}) {
           const reasonForCallback = typeof message.reason === 'string' ? message.reason : 
                                    message.reason ? JSON.stringify(message.reason) : 'Unknown error';
           options.onMessageRejected(reasonForCallback);
+        }
+        break;
+        
+      case 'RateLimitWaitNotification':
+        if (options.onRateLimitWait) {
+          options.onRateLimitWait({
+            wait_seconds: (message as any).wait_seconds,
+            message: (message as any).message
+          });
         }
         break;
     }

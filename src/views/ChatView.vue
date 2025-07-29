@@ -130,6 +130,9 @@ const confirmInterruptDialog = ref(false);
 const toolCallConfirmDialog = ref(false);
 const debriefingData = ref<DebriefingData | null>(null);
 
+// Rate limit notification timer
+let rateLimitTimer: number | null = null;
+
 // Computed properties
 const connectionLoadingTitle = computed(() => {
   const userRole = sessionStore.userRole;
@@ -142,6 +145,38 @@ const connectionLoadingTitle = computed(() => {
   }
   return '接続を準備中...';
 });
+
+// Rate limit notification handler
+const handleRateLimitWait = (data: { wait_seconds: number; message: string }) => {
+  // 傍聴者ロールの場合のみ表示
+  if (sessionStore.userRole !== '傍聴者') {
+    return;
+  }
+  
+  // Set rate limit message in chat store
+  chatStore.setRateLimitMessage(data.message, data.wait_seconds);
+  
+  // Clear existing timer
+  if (rateLimitTimer) {
+    clearInterval(rateLimitTimer);
+  }
+  
+  // Start countdown timer
+  rateLimitTimer = setInterval(() => {
+    const currentRemaining = chatStore.rateLimitMessage?.remainingSeconds || 0;
+    const newRemaining = currentRemaining - 1;
+    
+    if (newRemaining <= 0) {
+      chatStore.clearRateLimitMessage();
+      if (rateLimitTimer) {
+        clearInterval(rateLimitTimer);
+        rateLimitTimer = null;
+      }
+    } else {
+      chatStore.updateRateLimitTimer(newRemaining);
+    }
+  }, 1000);
+};
 
 // WebSocket composable
 const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, sendEndSession } = useWebSocket({
@@ -195,6 +230,7 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
   onMessageRejected: (reason) => {
     console.error('Message rejected:', reason);
   },
+  onRateLimitWait: handleRateLimitWait,
 });
 
 // Event handlers

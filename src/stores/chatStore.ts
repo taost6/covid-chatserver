@@ -6,6 +6,12 @@ interface ChatState {
   inputText: string;
   isInputDisabled: boolean;
   isInputLocked: boolean;
+  rateLimitMessage: {
+    isVisible: boolean;
+    message: string;
+    remainingSeconds: number;
+    totalSeconds: number;
+  } | null;
 }
 
 export const useChatStore = defineStore('chat', {
@@ -14,6 +20,7 @@ export const useChatStore = defineStore('chat', {
     inputText: '',
     isInputDisabled: true,
     isInputLocked: false,
+    rateLimitMessage: null,
   }),
 
   getters: {
@@ -138,6 +145,27 @@ export const useChatStore = defineStore('chat', {
       this.inputText = '';
       this.isInputDisabled = true;
       this.isInputLocked = false;
+      this.rateLimitMessage = null;
+    },
+
+    // Rate limit message management
+    setRateLimitMessage(message: string, remainingSeconds: number) {
+      this.rateLimitMessage = {
+        isVisible: true,
+        message,
+        remainingSeconds,
+        totalSeconds: remainingSeconds,
+      };
+    },
+
+    updateRateLimitTimer(remainingSeconds: number) {
+      if (this.rateLimitMessage) {
+        this.rateLimitMessage.remainingSeconds = remainingSeconds;
+      }
+    },
+
+    clearRateLimitMessage() {
+      this.rateLimitMessage = null;
     },
   },
 });

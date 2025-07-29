@@ -236,7 +236,10 @@ class AIConversationManager:
                         response_msg, tool_call = await self.oaw.send_message(
                             current_ai, 
                             last_message,
-                            tools=[] if current_ai.role == "患者" else None  # 患者AIはFunction Calling無効
+                            tools=[] if current_ai.role == "患者" else None,  # 患者AIはFunction Calling無効
+                            user_ws=self.observer_user.ws,
+                            session_id=self.session.session_id,
+                            user_role=self.observer_user.role
                         )
                         self.last_api_duration = time.time() - api_start_time
                     
