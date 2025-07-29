@@ -509,13 +509,44 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
                 debriefing_data = args
                 logger.info("Successfully parsed debriefing report from specialist assistant.")
             except (json.JSONDecodeError, KeyError) as e:
-                # logger.error(f"[DEBRIEFING DEBUG] JSON parsing failed: {e}")
-                # logger.error(f"[DEBRIEFING DEBUG] Failed to parse debriefing tool call arguments: {e}")
-                # logger.error(f"[DEBRIEFING DEBUG] Raw arguments (full): {tool_call.function.arguments}")
-                # import traceback
-                # logger.error(f"[DEBRIEFING DEBUG] Full parsing traceback: {traceback.format_exc()}")
-                logger.error(f"Failed to parse debriefing tool call arguments: {e}")
-                debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
+                logger.error(f"[DEBRIEFING DEBUG] JSON parsing failed: {e}")
+                logger.error(f"[DEBRIEFING DEBUG] Failed to parse debriefing tool call arguments: {e}")
+                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (first 500 chars): {tool_call.function.arguments[:500] if tool_call.function.arguments else 'None'}")
+                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (last 500 chars): {tool_call.function.arguments[-500:] if tool_call.function.arguments and len(tool_call.function.arguments) > 500 else 'N/A'}")
+                logger.error(f"[DEBRIEFING DEBUG] Arguments length: {len(tool_call.function.arguments) if tool_call.function.arguments else 0}")
+                
+                # エラー位置周辺の文字を確認
+                if tool_call.function.arguments and len(tool_call.function.arguments) > 1911:
+                    error_context = tool_call.function.arguments[1900:1920]
+                    logger.error(f"[DEBRIEFING DEBUG] Error context around char 1912: '{error_context}'")
+                
+                import traceback
+                logger.error(f"[DEBRIEFING DEBUG] Full parsing traceback: {traceback.format_exc()}")
+                
+                # 部分的なJSON修復を試行
+                try:
+                    # 不完全なJSONの場合、閉じ括弧を追加して修復を試みる
+                    raw_args = tool_call.function.arguments.strip()
+                    if raw_args and not raw_args.endswith('}'):
+                        logger.info("[DEBRIEFING DEBUG] Attempting to repair incomplete JSON...")
+                        # 最後の完全なフィールドまでを取得
+                        last_quote_pos = raw_args.rfind('"')
+                        if last_quote_pos > 0:
+                            # 最後の引用符以降を削除して閉じ括弧を追加
+                            repaired_json = raw_args[:last_quote_pos + 1]
+                            if repaired_json.count('{') > repaired_json.count('}'):
+                                repaired_json += '}'
+                            args = json.loads(repaired_json)
+                            logger.info("[DEBRIEFING DEBUG] Successfully repaired and parsed incomplete JSON")
+                            debriefing_data = args
+                        else:
+                            raise ValueError("Cannot repair JSON")
+                    else:
+                        raise ValueError("Cannot repair JSON")
+                except Exception as repair_error:
+                    logger.error(f"[DEBRIEFING DEBUG] JSON repair failed: {repair_error}")
+                    logger.error(f"Failed to parse debriefing tool call arguments: {e}")
+                    debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: 評価データの解析エラー）"}
         else:
             # logger.error(f"[DEBRIEFING DEBUG] Unexpected tool call result")
             # logger.error(f"[DEBRIEFING DEBUG] tool_call is None: {tool_call is None}")

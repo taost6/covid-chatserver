@@ -121,7 +121,7 @@ class PatientRoleProvider:
 
         rand_val = random.random()
         if rand_val < 0.5:
-            return onset_date, "（PM・夜間）"
+            return onset_date, "（午後・夜間）"
         elif rand_val < 0.9:
             return onset_date + timedelta(days=1), ""
         else:
