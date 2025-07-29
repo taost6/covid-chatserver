@@ -35,6 +35,8 @@ export interface PatientInfo {
   onsetDate?: string;
   profile?: string;
   notes?: string;
+  test_status?: string;
+  disclosed_info?: string;
 }
 
 // セッション関連の型定義

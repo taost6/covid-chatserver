@@ -38,7 +38,7 @@ class PatientRoleProvider:
         
         self.target_columns = [
             "ID", "氏名", "年齢", "生年月日", "性別", "変換後都道府県", "プロフィール",
-            "感染日", "発症日",
+            "感染日", "発症日", "検査ステータス", "検査開始時点で開示されている情報",
             datetime(2022, 4, 2), datetime(2022, 4, 3), datetime(2022, 4, 4),
             datetime(2022, 4, 5), datetime(2022, 4, 6), datetime(2022, 4, 7),
             datetime(2022, 4, 8), datetime(2022, 4, 9), datetime(2022, 4, 10),
@@ -372,6 +372,8 @@ class PatientRoleProvider:
         
         details['profile'] = get_value('プロフィール', '情報なし')
         details['notes'] = get_value('備考欄', '特になし')
+        details['test_status'] = get_value('検査ステータス', '情報なし')
+        details['disclosed_info'] = get_value('検査開始時点で開示されている情報', '情報なし')
 
         return details
 
