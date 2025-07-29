@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -153,17 +153,27 @@ const handleRateLimitWait = (data: { wait_seconds: number; message: string }) =>
     return;
   }
   
+  // Clear existing timer first to prevent conflicts
+  if (rateLimitTimer) {
+    clearInterval(rateLimitTimer);
+    rateLimitTimer = null;
+  }
+  
   // Set rate limit message in chat store
   chatStore.setRateLimitMessage(data.message, data.wait_seconds);
   
-  // Clear existing timer
-  if (rateLimitTimer) {
-    clearInterval(rateLimitTimer);
-  }
-  
   // Start countdown timer
   rateLimitTimer = setInterval(() => {
-    const currentRemaining = chatStore.rateLimitMessage?.remainingSeconds || 0;
+    if (!chatStore.rateLimitMessage) {
+      // Message was cleared externally, clean up timer
+      if (rateLimitTimer) {
+        clearInterval(rateLimitTimer);
+        rateLimitTimer = null;
+      }
+      return;
+    }
+    
+    const currentRemaining = chatStore.rateLimitMessage.remainingSeconds;
     const newRemaining = currentRemaining - 1;
     
     if (newRemaining <= 0) {
@@ -275,6 +285,7 @@ const handleRegistrationSuccess = async (data: { userId: string; sessionId: stri
 };
 
 const sessionInitialized = () => {
+  cleanup(); // Clean up rate limit timer
   sessionStore.reset();
   chatStore.reset();
   patientStore.reset();
@@ -491,6 +502,15 @@ const restoreSession = async () => {
   }
 };
 
+// Cleanup function
+const cleanup = () => {
+  if (rateLimitTimer) {
+    clearInterval(rateLimitTimer);
+    rateLimitTimer = null;
+  }
+  chatStore.clearRateLimitMessage();
+};
+
 // Initialization
 onMounted(async () => {
   try {
@@ -506,6 +526,11 @@ onMounted(async () => {
     console.error('Initialization error:', error);
     // 復元に失敗した場合も何もしない（NavigationDrawerが自動でモーダルを表示）
   }
+});
+
+// Cleanup on unmount
+onUnmounted(() => {
+  cleanup();
 });
 </script>
 

@@ -204,9 +204,9 @@ class OpenAIAssistantWrapper():
             if should_wait_requests and wait_time_requests > 0:
                 logging.info(f"Rate limit proactive wait for requests: {wait_time_requests:.1f} seconds")
                 
-                # 傍聴者ロールの場合のみWebSocketで通知
-                if user_role == "傍聴者" and user_ws and session_id:
-                    await self._send_rate_limit_notification(user_ws, session_id, int(wait_time_requests), "リクエスト制限")
+                # 傍聴者ロールの場合のみWebSocketで通知（最低2秒以上の待機時間がある場合のみ）
+                if user_role == "傍聴者" and user_ws and session_id and wait_time_requests >= 2.0:
+                    await self._send_rate_limit_notification(user_ws, session_id, max(2, int(wait_time_requests)), "リクエスト制限")
                 
                 await sleep(wait_time_requests)
             
@@ -215,9 +215,9 @@ class OpenAIAssistantWrapper():
             if should_wait_tokens and wait_time_tokens > 0:
                 logging.info(f"Rate limit proactive wait for tokens: {wait_time_tokens:.1f} seconds")
                 
-                # 傍聴者ロールの場合のみWebSocketで通知
-                if user_role == "傍聴者" and user_ws and session_id:
-                    await self._send_rate_limit_notification(user_ws, session_id, int(wait_time_tokens), "トークン制限")
+                # 傍聴者ロールの場合のみWebSocketで通知（最低2秒以上の待機時間がある場合のみ）
+                if user_role == "傍聴者" and user_ws and session_id and wait_time_tokens >= 2.0:
+                    await self._send_rate_limit_notification(user_ws, session_id, max(2, int(wait_time_tokens)), "トークン制限")
                 
                 await sleep(wait_time_tokens)
                 
@@ -227,13 +227,23 @@ class OpenAIAssistantWrapper():
     async def _send_rate_limit_notification(self, user_ws, session_id: str, wait_seconds: int, reason: str):
         """レート制限待機通知をWebSocketで送信"""
         try:
+            if not user_ws:
+                return
+                
             from modelChat import RateLimitWaitNotification
             notification = RateLimitWaitNotification(
                 session_id=session_id,
                 wait_seconds=wait_seconds,
                 message=f"APIの{reason}により{wait_seconds}秒間待機します..."
             )
+            
+            # WebSocket接続状態を確認
+            if hasattr(user_ws, 'client_state') and user_ws.client_state.name != 'CONNECTED':
+                logging.warning(f"WebSocket not connected, skipping rate limit notification")
+                return
+                
             await user_ws.send_json(notification.dict())
+            logging.debug(f"Rate limit notification sent: {wait_seconds}s for {reason}")
         except Exception as e:
             logging.warning(f"Failed to send rate limit notification: {e}")
 
