@@ -9,6 +9,7 @@ interface WebSocketOptions {
   onSessionTerminated?: () => void;
   onDebriefingResponse?: (data: any) => void;
   onToolCallDetected?: () => void;
+  onConversationEndChoices?: () => void;
   onConversationContinueAccepted?: () => void;
   onMessageRejected?: (reason: string) => void;
   onRateLimitWait?: (data: { wait_seconds: number; message: string }) => void;
@@ -65,8 +66,10 @@ export function useWebSocket(options: WebSocketOptions = {}) {
 
       ws.onmessage = (event) => {
         try {
+          console.log('WS Raw data received:', event.data);
           const message: WebSocketMessage = JSON.parse(event.data);
-          console.log('WS Received:', message);
+          console.log('WS Parsed message:', message);
+          console.log('WS Message type:', message.msg_type);
           
           handleMessage(message);
           
@@ -75,6 +78,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
           }
         } catch (error) {
           console.error('WebSocket message parse error:', error);
+          console.error('Raw data that failed to parse:', event.data);
         }
       };
 
@@ -99,6 +103,7 @@ export function useWebSocket(options: WebSocketOptions = {}) {
   }
 
   function handleMessage(message: WebSocketMessage) {
+    console.log('[WebSocket] handleMessage called with:', message.msg_type);
     switch (message.msg_type) {
       case 'Established':
         if (message.session_id) {
@@ -156,6 +161,8 @@ export function useWebSocket(options: WebSocketOptions = {}) {
         break;
 
       case 'DebriefingResponse':
+        console.log('[WebSocket] DebriefingResponse received - removing choices');
+        chatStore.removeConversationEndChoices(); // 会話終了選択肢を削除
         if (options.onDebriefingResponse) {
           options.onDebriefingResponse(message.debriefing_data);
         }
@@ -167,7 +174,20 @@ export function useWebSocket(options: WebSocketOptions = {}) {
         }
         break;
 
+      case 'ConversationEndChoices':
+        console.log('[WebSocket] ConversationEndChoices case matched!');
+        console.log('[WebSocket] ConversationEndChoices received:', message);
+        console.log('[WebSocket] Message content:', message.message);
+        // Add system message with choices
+        chatStore.addConversationEndChoices(message.message || '会話の終了を検知しました');
+        if (options.onConversationEndChoices) {
+          options.onConversationEndChoices();
+        }
+        break;
+
       case 'ConversationContinueAccepted':
+        console.log('[WebSocket] ConversationContinueAccepted received - removing choices');
+        chatStore.removeConversationEndChoices(); // 会話終了選択肢を削除
         chatStore.setInputLocked(false);
         if (options.onConversationContinueAccepted) {
           options.onConversationContinueAccepted();
@@ -204,6 +224,10 @@ export function useWebSocket(options: WebSocketOptions = {}) {
             message: (message as any).message
           });
         }
+        break;
+        
+      default:
+        console.warn('[WebSocket] Unhandled message type:', message.msg_type, message);
         break;
     }
   }

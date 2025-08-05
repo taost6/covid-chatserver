@@ -28,7 +28,11 @@
       </v-toolbar>
       
       <v-card-text id="chat-history-container" ref="chatContainer">
-        <MessageList :messages="chatStore.messages" />
+        <MessageList 
+          :messages="chatStore.messages" 
+          @continue-conversation="$emit('continueConversation')"
+          @proceed-to-debriefing="$emit('proceedToDebriefing')"
+        />
         
         <!-- Rate Limit Message -->
         <div v-if="chatStore.rateLimitMessage?.isVisible" class="mt-4">
@@ -66,6 +70,11 @@ import { useChatStore } from '@/stores/chatStore';
 import { useScrollToBottom } from '@/composables/useScrollToBottom';
 import MessageList from '@/components/features/MessageList.vue';
 import type { ChatMessage } from '@/types';
+
+const emit = defineEmits<{
+  continueConversation: []
+  proceedToDebriefing: []
+}>()
 
 const sessionStore = useSessionStore();
 const patientStore = usePatientStore();

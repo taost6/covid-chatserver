@@ -9,7 +9,11 @@
         <PatientInfoPanel />
 
         <!-- Chat Window -->
-        <ChatWindow ref="chatWindow" />
+        <ChatWindow 
+          ref="chatWindow" 
+          @continue-conversation="continueConversation"
+          @proceed-to-debriefing="proceedToDebriefing"
+        />
       </v-container>
     </v-main>
 
@@ -227,8 +231,9 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
       }
     });
   },
-  onToolCallDetected: () => {
-    toolCallConfirmDialog.value = true;
+  onConversationEndChoices: () => {
+    // No dialog needed - the system message will handle the UI
+    console.log('Conversation end choices displayed in chat');
   },
   onConversationContinueAccepted: () => {
     console.log('Conversation continue accepted');
@@ -308,7 +313,6 @@ const proceedToDebriefing = () => {
   // Check if debriefing already exists
   if (sessionStore.debriefingExists) {
     console.warn('Debriefing already exists for this session');
-    toolCallConfirmDialog.value = false;
     // Redirect to existing debriefing page
     router.push({
       name: 'debriefing',
@@ -319,7 +323,7 @@ const proceedToDebriefing = () => {
     return;
   }
 
-  toolCallConfirmDialog.value = false;
+  // Called from system message button - no dialog to close
   drawer.value = false; // サイドバーを隠す
   sessionStore.setLoadingDebriefing(true);
   
@@ -332,7 +336,7 @@ const proceedToDebriefing = () => {
 };
 
 const continueConversation = () => {
-  toolCallConfirmDialog.value = false;
+  // Called from system message button - no dialog to close
   try {
     sendContinueConversation();
   } catch (error) {

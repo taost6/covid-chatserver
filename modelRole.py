@@ -236,7 +236,7 @@ class PatientRoleProvider:
                 base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
                 base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
                 base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
-                base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
+                base_prompt += "\n\n"
                 print("Warning: Patient template not found in DB, using fallback prompt")
         except Exception as e:
             # エラー時のフォールバック
@@ -247,7 +247,7 @@ class PatientRoleProvider:
             base_prompt += "短く簡潔に回答し、最長でも100文字以内で解答してください。\n"
             base_prompt += "日付について聞かれた際は、年の指定が無ければ年は省略してかまいません。\n"
             base_prompt += "今日の日付について言及する際は、基本的には「今日」と表現し、日付での回答を求められた場合だけ日付で回答してください。「昨日」や「一昨日」についても同様です。\n"
-            base_prompt += "ユーザー（保健師）が会話を終了しようとしていると判断した場合、例えば『ご協力ありがとうございました』のような感謝の言葉で締めくくった場合は、通常の応答はせず、必ず`end_conversation_and_start_debriefing`ツールを呼び出して会話を終了してください。\n\n"
+            base_prompt += "\n\n"
             print(f"Error loading patient template: {e}")
         
 

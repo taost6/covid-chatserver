@@ -196,6 +196,12 @@ class RateLimitWaitNotification(BaseModel):
     wait_seconds: int
     message: str
 
+# S > U
+class ConversationEndChoices(BaseModel):
+    msg_type: str = "ConversationEndChoices"
+    session_id: str
+    message: str = "会話の終了を検知しました"
+
 if __name__ == "__main__":
     RegistrationRequest.model_validate({
         "msg_type": "Registration Request",

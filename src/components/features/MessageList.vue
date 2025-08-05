@@ -19,7 +19,30 @@
           >
             {{ message.icon }}
           </v-icon>
-          <div :class="fontSizeClass" class="message-text" v-html="processMessageForDisplay(message.message, message.sender)"></div>
+          <div class="flex-grow-1">
+            <div :class="fontSizeClass" class="message-text" v-html="processMessageForDisplay(message.message, message.sender)"></div>
+            
+            <!-- Conversation End Choices -->
+            <div v-if="message.sender === 'conversation-end-choices'" class="mt-3">
+              <v-btn 
+                variant="outlined"
+                color="success"
+                size="small"
+                class="mr-2"
+                @click="continueConversation"
+              >
+                会話を続ける
+              </v-btn>
+              <v-btn 
+                variant="outlined"
+                color="primary"
+                size="small"
+                @click="proceedToDebriefing"
+              >
+                評価へ進む
+              </v-btn>
+            </div>
+          </div>
         </div>
         <div 
           v-if="showTimestamp"
@@ -56,6 +79,11 @@ const props = withDefaults(defineProps<Props>(), {
   showTimestamp: false
 });
 
+const emit = defineEmits<{
+  continueConversation: []
+  proceedToDebriefing: []
+}>()
+
 const router = useRouter();
 
 const fontSize = ref(1);
@@ -69,6 +97,17 @@ const fontSizeClass = computed(() => {
   }
 });
 
+// Button click handlers
+const continueConversation = () => {
+  console.log('[MessageList] Continue conversation button clicked');
+  emit('continueConversation');
+};
+
+const proceedToDebriefing = () => {
+  console.log('[MessageList] Proceed to debriefing button clicked');
+  emit('proceedToDebriefing');
+};
+
 const getJustify = (sender: string) => {
   if (sender === 'user' || sender === 'User') return 'justify-end';
   if (sender === 'assistant' || sender === 'Assistant') return 'justify-start';
@@ -78,6 +117,11 @@ const getJustify = (sender: string) => {
 const getBubbleClass = (sender: string, message?: string) => {
   if (sender === 'user' || sender === 'User') return 'message-bubble-user';
   if (sender === 'assistant' || sender === 'Assistant') return 'message-bubble-assistant';
+  
+  // Conversation end choices: special styling
+  if (sender === 'conversation-end-choices') {
+    return 'message-bubble-conversation-choices';
+  }
   
   // System messages: check if it's an error or info message
   if (sender === 'system' || sender === 'System') {
@@ -93,6 +137,11 @@ const getBubbleClass = (sender: string, message?: string) => {
 const getIconColor = (sender: string, message?: string) => {
   if (sender === 'user' || sender === 'User') return 'white';
   if (sender === 'assistant' || sender === 'Assistant') return 'blue-darken-2';
+  
+  // Conversation end choices: special color
+  if (sender === 'conversation-end-choices') {
+    return 'orange-darken-2';
+  }
   
   // System messages: check if it's an error or info message
   if (sender === 'system' || sender === 'System') {
@@ -226,6 +275,14 @@ onMounted(() => {
   color: #166534 !important;
   border: 1px solid #bbf7d0 !important;
   box-shadow: 0 1px 3px rgba(34, 197, 94, 0.1) !important;
+  border-radius: 12px !important;
+}
+
+.message-bubble-conversation-choices {
+  background-color: #fff7ed !important;
+  color: #c2410c !important;
+  border: 1px solid #fed7aa !important;
+  box-shadow: 0 1px 3px rgba(194, 65, 12, 0.1) !important;
   border-radius: 12px !important;
 }
 

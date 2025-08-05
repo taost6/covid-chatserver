@@ -5,7 +5,7 @@ export interface MessageInfo {
 }
 
 export interface ChatMessage {
-  sender: 'user' | 'assistant' | 'system';
+  sender: 'user' | 'assistant' | 'system' | 'conversation-end-choices';
   message: string | any; // WebSocketから受信する場合、オブジェクトの可能性もある
   icon: string;
 }
@@ -74,6 +74,7 @@ export interface WebSocketMessage {
   session_id?: string;
   user_id?: string;
   user_msg?: string | any; // バックエンドからオブジェクトとして送信される場合もある
+  message?: string; // ConversationEndChoices用
   user_status?: string;
   interview_date?: string;
   reason?: string;

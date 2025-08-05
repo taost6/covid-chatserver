@@ -299,20 +299,8 @@ class OpenAIAssistantWrapper():
                            user_role: Optional[str] = None,
                            ) -> (Optional[str], Optional[Any]):
             if tools is None:
-                # デフォルトのツール（関数）の定義
-                tools = [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "end_conversation_and_start_debriefing",
-                            "description": "ユーザーが会話の終了を望んでいると判断した場合に、会話を終了し、評価フェーズを開始します。",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                            },
-                        },
-                    }
-                ]
+                # デフォルトツール無し（会話終了検出は専用Assistantが担当）
+                tools = []
 
             # 初回実行時に保守的な制限値を設定
             if self.rate_limit_info.limit_requests == 0:

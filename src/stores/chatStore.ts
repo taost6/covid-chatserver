@@ -88,6 +88,16 @@ export const useChatStore = defineStore('chat', {
       });
     },
 
+    addConversationEndChoices(text: string) {
+      console.log('[ChatStore] Adding conversation end choices:', text);
+      this.addMessage({
+        sender: 'conversation-end-choices',
+        message: text,
+        icon: 'mdi-chat-alert-outline',
+      });
+      console.log('[ChatStore] Total messages after adding choices:', this.messages.length);
+    },
+
     // 傍聴者専用：保健師AIの発言（右側表示）
     addNurseAIMessage(text: string) {
       // Function call関連のテキストを含む場合は表示しない
@@ -166,6 +176,12 @@ export const useChatStore = defineStore('chat', {
 
     clearRateLimitMessage() {
       this.rateLimitMessage = null;
+    },
+
+    removeConversationEndChoices() {
+      console.log('[ChatStore] Removing conversation end choices');
+      this.messages = this.messages.filter(msg => msg.sender !== 'conversation-end-choices');
+      console.log('[ChatStore] Messages after removal:', this.messages.length);
     },
   },
 });

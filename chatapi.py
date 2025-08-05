@@ -30,6 +30,192 @@ from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 # Logger setup
 logger = logging.getLogger(__name__)
 
+class ConversationEndDetector:
+    """会話終了検出専用Assistantの管理クラス"""
+    
+    def __init__(self, oaw: OpenAIAssistantWrapper):
+        self.oaw = oaw
+        self.assistant_id = None
+        self.thread_id = None
+        self.assistant_def = None
+        self._detection_lock = asyncio.Semaphore(1)  # 同時実行制御
+        
+    async def initialize(self):
+        """会話終了検出用Assistantを初期化"""
+        try:
+            self.assistant_id = _get_conversation_end_detector_assistant_id()
+            logger.debug(f"Retrieved conversation end detector assistant ID: {self.assistant_id}")
+            
+            self.thread_id = await self.oaw.create_thread()
+            logger.debug(f"Created thread for conversation end detector: {self.thread_id}")
+            
+            # AssistantDefオブジェクトを作成
+            self.assistant_def = AssistantDef(
+                user_id=ai_get_id(),
+                role="評価者",  # 会話終了検出専用だが、既存のrole制限に合わせる
+                assistant_id=self.assistant_id,
+                thread_id=self.thread_id
+            )
+            
+            # 初期プロンプトを設定
+            initial_prompt = (
+                "あなたは会話終了検出の専門家です。"
+                "一方が会話の終了を強く示唆する発言をし、その相手方がそれに合意して会話が終了したと判断される場合は、"
+                "`detect_conversation_end`ツールを呼び出してください。"
+                "会話が継続中の場合は何も応答せず、ツールも呼び出さないでください。"
+            )
+            
+            await self.oaw.add_message_to_thread(self.thread_id, initial_prompt)
+            logger.info(f"Conversation end detector initialized successfully: assistant_id={self.assistant_id}, thread_id={self.thread_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize conversation end detector: {e}")
+            raise
+    
+    async def add_conversation_message(self, message_text: str, sender_role: str):
+        """会話メッセージを検出用スレッドに追加（LLMの応答のみ）"""
+        if not self.thread_id:
+            logger.warning("Conversation end detector not initialized")
+            return
+            
+        # LLMの応答のみを追加（患者AI、保健師AIの応答）
+        if sender_role in ["患者", "保健師"]:
+            try:
+                # アクティブなrunがある場合は先にキャンセル
+                await self.cancel_active_runs()
+                
+                formatted_message = f"[{sender_role}]: {message_text}"
+                await self.oaw.add_message_to_thread(self.thread_id, formatted_message)
+                logger.debug(f"Added message to end detector: [{sender_role}] {message_text[:50]}...")
+            except Exception as e:
+                logger.error(f"Failed to add message to conversation end detector: {e}")
+                # メッセージ追加失敗時は検出をスキップ
+    
+    async def check_conversation_end(self):
+        """会話終了検出を実行"""
+        if not self.thread_id or not self.assistant_def:
+            logger.warning("Conversation end detector not properly initialized")
+            return None
+        
+        # セマフォを使用して同時実行を制御
+        async with self._detection_lock:
+            try:
+                # 念のため再度アクティブなrunをチェック・キャンセル
+                await self.cancel_active_runs()
+                
+                # 会話終了検出ツール定義
+                detection_tool = {
+                    "type": "function",
+                    "function": {
+                        "name": "detect_conversation_end",
+                        "description": "会話が自然に終了したと判断される場合に呼び出します",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "confidence": {
+                                    "type": "number",
+                                    "description": "会話終了の確信度（0.0-1.0）"
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "description": "終了判定の理由"
+                                }
+                            },
+                            "required": ["confidence", "reason"]
+                        }
+                    }
+                }
+                
+                # 検出指示を送信
+                detection_instruction = "上記の会話を分析し、会話が終了したと判断される場合のみツールを呼び出してください。"
+                
+                response, tool_call = await self.oaw.send_message(
+                    self.assistant_def,
+                    detection_instruction,
+                    tools=[detection_tool],
+                    max_retries=1  # 高速化のためリトライ回数を削減
+                )
+                
+                if tool_call and tool_call.function.name == "detect_conversation_end":
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                        confidence = args.get("confidence", 0.0)
+                        reason = args.get("reason", "")
+                        
+                        logger.info(f"Conversation end detected! Confidence: {confidence}, Reason: {reason}")
+                        return {
+                            "detected": True,
+                            "confidence": confidence,
+                            "reason": reason
+                        }
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse end detection arguments: {e}")
+                        return None
+                
+                return None  # 会話継続中
+                
+            except Exception as e:
+                logger.error(f"Error during conversation end detection: {e}")
+                return None
+    
+    async def reset(self):
+        """検出器をリセット（新しいスレッドを作成）"""
+        try:
+            # 既存のスレッドを削除
+            if self.thread_id and self.oaw:
+                try:
+                    await self.oaw.delete_thread_by_id(self.thread_id)
+                    logger.debug("Old conversation end detector thread deleted")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old end detector thread: {e}")
+            
+            # 新しいスレッドを作成
+            self.thread_id = await self.oaw.create_thread()
+            
+            # AssistantDefオブジェクトを更新
+            self.assistant_def = AssistantDef(
+                user_id=ai_get_id(),
+                role="評価者",  # 会話終了検出専用だが、既存のrole制限に合わせる
+                assistant_id=self.assistant_id,
+                thread_id=self.thread_id
+            )
+            
+            # 初期プロンプトを設定
+            initial_prompt = (
+                "あなたは会話終了検出の専門家です。"
+                "一方が会話の終了を強く示唆する発言をし、その相手方がそれに合意して会話が終了したと判断される場合は、"
+                "`detect_conversation_end`ツールを呼び出してください。"
+                "会話が継続中の場合は何も応答せず、ツールも呼び出さないでください。"
+            )
+            
+            await self.oaw.add_message_to_thread(self.thread_id, initial_prompt)
+            logger.info("Conversation end detector reset successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to reset conversation end detector: {e}")
+            raise
+    
+    async def cancel_active_runs(self):
+        """アクティブなrunをキャンセル"""
+        if self.thread_id and self.oaw:
+            try:
+                success = await self.oaw.cancel_run(self.thread_id)
+                if success:
+                    logger.info("Cancelled active runs for conversation end detector")
+                else:
+                    logger.debug("No active runs to cancel for conversation end detector")
+            except Exception as e:
+                logger.warning(f"Failed to cancel active runs for end detector: {e}")
+    
+    async def cleanup(self):
+        """リソースをクリーンアップ"""
+        if self.thread_id and self.oaw:
+            try:
+                await self.oaw.delete_thread_by_id(self.thread_id)
+                logger.info("Conversation end detector thread cleaned up")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup end detector thread: {e}")
+
 class APISession(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
@@ -37,6 +223,8 @@ class APISession(BaseModel):
     history: History
     session_id: str
     ai_conversation_manager: Optional[Any] = None
+    conversation_end_detector: Optional[ConversationEndDetector] = None
+    skip_next_end_detection: bool = False  # 次回の会話終了検知をスキップするフラグ
 
 # --- Prompt Management Models ---
 class PromptTemplateRequest(BaseModel):
@@ -154,6 +342,19 @@ def _find_peer_human(user: UserDef) -> UserDef:
         if u.role == peer_role and u.status == Status.Prepared.name:
             return u
     return None
+
+def _get_conversation_end_detector_assistant_id() -> str:
+    """assistants.jsonから4つ目のIDを会話終了検出専用Assistantとして取得"""
+    try:
+        assistants = json.load(open("assistants.json"))
+        if len(assistants) >= 4:
+            return assistants[3]  # 0-indexed
+        else:
+            raise ValueError(f"会話終了検出用Assistant IDが不足しています。assistants.jsonに最低4つのIDが必要です。現在: {len(assistants)}個")
+    except FileNotFoundError:
+        raise FileNotFoundError("assistants.jsonファイルが見つかりません")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"assistants.jsonの形式が不正です: {e}")
 
 def _find_peer_ai(user: UserDef) -> AssistantDef:
     assistants = json.load(open("assistants.json"))
@@ -1067,6 +1268,15 @@ def api(config):
                     assistant.thread_id = db_session.thread_id
                     history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
                     active_session = APISession(users=[user, assistant], history=history, session_id=user.session_id)
+                    
+                    # 会話終了検出器を初期化
+                    try:
+                        active_session.conversation_end_detector = ConversationEndDetector(oaw)
+                        await active_session.conversation_end_detector.initialize()
+                        logger.info("Conversation end detector initialized for restored session")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize conversation end detector for restored session: {e}")
+                    
                     users_session[user.session_id] = active_session
 
                     # Restore history from DB
@@ -1091,6 +1301,15 @@ def api(config):
             if peer:
                 session_id = user.session_id or ai_get_id() # Fallback for safety
                 session = APISession(users=[user, peer], history=History(), session_id=session_id)
+                
+                # 会話終了検出器を初期化（人間同士の場合）
+                try:
+                    session.conversation_end_detector = ConversationEndDetector(oaw)
+                    await session.conversation_end_detector.initialize()
+                    logger.info("Conversation end detector initialized for human-to-human session")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize conversation end detector for human session: {e}")
+                
                 users_session[session_id] = session
                 del users_waiting[user.user_id]
                 del users_waiting[peer.user_id]
@@ -1229,6 +1448,15 @@ def api(config):
 
                     history = History(assistant={"role": assistant.role, "assistant_id": assistant.assistant_id})
                     session = APISession(users=[user, assistant], history=history, session_id=session_id)
+                    
+                    # 会話終了検出器を初期化（人間とAIの場合）
+                    try:
+                        session.conversation_end_detector = ConversationEndDetector(oaw)
+                        await session.conversation_end_detector.initialize()
+                        logger.info("Conversation end detector initialized for human-AI session")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize conversation end detector for human-AI session: {e}")
+                    
                     users_session[session_id] = session
                     del users_waiting[user.user_id]
 
@@ -1365,6 +1593,14 @@ def api(config):
                     history = History()
                     session = APISession(users=[user], history=history, session_id=session_id)
                     
+                    # 会話終了検出器を初期化（傍聴者の場合）
+                    try:
+                        session.conversation_end_detector = ConversationEndDetector(oaw)
+                        await session.conversation_end_detector.initialize()
+                        logger.info("Conversation end detector initialized for observer session")
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize conversation end detector for observer session: {e}")
+                    
                     # Initialize AI conversation manager
                     ai_manager = AIConversationManager(session, user, oaw, role_provider, db, logger)
                     session.ai_conversation_manager = ai_manager
@@ -1422,6 +1658,45 @@ def api(config):
                     m = MessageSubmitted.model_validate(data)
                     await log_message(db, session.session_id, user.user_name, user.target_patient_id, user.role, "User", m.user_msg, logger, is_initial_message=False)
                     session.history.history.append(MessageInfo(role=user.role, text=m.user_msg))
+                    
+                    # 保健師ロールの場合、ユーザー（保健師）の発言後も会話終了検出を実行
+                    if user.role == "保健師" and session.conversation_end_detector:
+                        logger.info(f"Processing end detection after nurse user message for session {session.session_id}")
+                        try:
+                            # ユーザーメッセージを検出器に追加
+                            await session.conversation_end_detector.add_conversation_message(m.user_msg, user.role)
+                            logger.info(f"Added user message to end detector: [{user.role}] {m.user_msg[:50]}...")
+                            
+                            # 会話継続直後は検出をスキップ
+                            if session.skip_next_end_detection:
+                                session.skip_next_end_detection = False  # フラグをリセット
+                                logger.info("Skipping conversation end detection (continue request)")
+                            else:
+                                # 会話終了を検出
+                                logger.info("Executing conversation end detection after nurse user message...")
+                                end_detection_result = await session.conversation_end_detector.check_conversation_end()
+                                logger.info(f"End detection result: {end_detection_result}")
+                                
+                                if end_detection_result and end_detection_result.get("detected"):
+                                    confidence = end_detection_result.get("confidence", 0.0)
+                                    reason = end_detection_result.get("reason", "")
+                                    
+                                    # 確信度が0.95以上の場合に会話終了として扱う
+                                    confidence_threshold = 0.95
+                                    if confidence >= confidence_threshold:
+                                        logger.info(f"Conversation end detected by specialist AI (confidence: {confidence:.2f}): {reason}")
+                                        
+                                        # WebSocketで会話終了選択肢を通知
+                                        await user.ws.send_json(ConversationEndChoices(session_id=session.session_id).model_dump())
+                                        # 会話終了が検出された場合、AI応答は生成しない
+                                        continue
+                                    else:
+                                        logger.info(f"Conversation end detected but confidence too low (confidence: {confidence:.2f} < {confidence_threshold}): {reason}")
+                                else:
+                                    logger.info("No conversation end detected after nurse message, continuing...")
+                        except Exception as e:
+                            logger.error(f"Error during conversation end detection after user message: {e}")
+                            # 検出エラーは会話を止めない
 
                     for peer in session.users:
                         if peer.user_id == user.user_id: continue
@@ -1463,7 +1738,7 @@ def api(config):
                             if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
                                 # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す
                                 logger.info(f"Tool call detected: {tool_call.function.name}. Notifying client...")
-                                await user.ws.send_json(ToolCallDetected(session_id=session.session_id).dict())
+                                await user.ws.send_json(ConversationEndChoices(session_id=session.session_id).model_dump())
                             elif response_msg:
                                 if response_msg.startswith("FAILED:"):
                                     # エラー応答
@@ -1474,6 +1749,68 @@ def api(config):
                                     session.history.history.append(MessageInfo(role=peer.role, text=response_msg))
                                     await log_message(db, session.session_id, "AI", peer.assistant_id, user.role, "Assistant", response_msg, logger, is_initial_message=False, ai_role=peer.role)
                                     await user.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=response_msg).dict())
+                                    
+                                    # 会話終了検出処理（各メッセージ交換後）- 患者側の発言後のみ実行
+                                    logger.info(f"Processing end detection for session {session.session_id}")
+                                    if session.conversation_end_detector:
+                                        logger.info(f"Conversation end detector found for session {session.session_id}")
+                                        try:
+                                            # AI応答を検出器に追加（常に履歴は蓄積する）
+                                            await session.conversation_end_detector.add_conversation_message(response_msg, peer.role)
+                                            logger.info(f"Added message to end detector: [{peer.role}] {response_msg[:50]}...")
+                                            
+                                            # ロールに応じて会話終了検出を実行
+                                            should_detect = False
+                                            detection_reason = ""
+                                            
+                                            if user.role == "保健師":
+                                                # 保健師ロールの場合: 患者AIの発言後とユーザー（保健師）の発言後の両方で検出
+                                                if peer.role == "患者":
+                                                    should_detect = True
+                                                    detection_reason = "patient AI response in nurse session"
+                                                else:
+                                                    logger.info(f"Skipping end detection - peer role is {peer.role}, expected 患者 for nurse session")
+                                            elif user.role == "患者":
+                                                # 患者ロールの場合: 患者の発言後のみ検出（従来通り）
+                                                if peer.role == "患者":
+                                                    should_detect = True
+                                                    detection_reason = "patient response in patient session"
+                                                else:
+                                                    logger.info(f"Skipping end detection - waiting for patient response (current peer: {peer.role})")
+                                            else:
+                                                logger.info(f"Skipping end detection - unsupported user role: {user.role}")
+                                            
+                                            if should_detect:
+                                                # 会話継続直後は検出をスキップ
+                                                if session.skip_next_end_detection:
+                                                    session.skip_next_end_detection = False  # フラグをリセット
+                                                    logger.info("Skipping conversation end detection (continue request)")
+                                                else:
+                                                    # 会話終了を検出
+                                                    logger.info(f"Executing conversation end detection after {detection_reason}...")
+                                                    end_detection_result = await session.conversation_end_detector.check_conversation_end()
+                                                    logger.info(f"End detection result: {end_detection_result}")
+                                                    
+                                                    if end_detection_result and end_detection_result.get("detected"):
+                                                        confidence = end_detection_result.get("confidence", 0.0)
+                                                        reason = end_detection_result.get("reason", "")
+                                                        
+                                                        # 確信度が0.95以上の場合に会話終了として扱う
+                                                        confidence_threshold = 0.95
+                                                        if confidence >= confidence_threshold:
+                                                            logger.info(f"Conversation end detected by specialist AI (confidence: {confidence:.2f}): {reason}")
+                                                            
+                                                            # WebSocketで会話終了選択肢を通知
+                                                            await user.ws.send_json(ConversationEndChoices(session_id=session.session_id).model_dump())
+                                                        else:
+                                                            logger.info(f"Conversation end detected but confidence too low (confidence: {confidence:.2f} < {confidence_threshold}): {reason}")
+                                                    else:
+                                                        logger.info("No conversation end detected, continuing...")
+                                        except Exception as e:
+                                            logger.error(f"Error during conversation end detection: {e}")
+                                            # 検出エラーは会話を止めない
+                                    else:
+                                        logger.warning(f"No conversation end detector found for session {session.session_id}")
                         elif isinstance(peer, UserDef):
                             await log_message(db, session.session_id, peer.user_name, peer.target_patient_id, peer.role, "Assistant", m.user_msg, logger, is_initial_message=False)
                             await peer.ws.send_json(MessageForwarded(session_id=session.session_id, user_msg=m.user_msg).dict())
@@ -1492,6 +1829,18 @@ def api(config):
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)
                     logger.info(f"ContinueConversationRequest received from user: {m.user_id}")
+                    
+                    # 会話終了検知器のアクティブなrunをキャンセル
+                    if session.conversation_end_detector:
+                        try:
+                            await session.conversation_end_detector.cancel_active_runs()
+                            logger.info("Cancelled active runs for conversation end detector")
+                        except Exception as e:
+                            logger.error(f"Failed to cancel active runs for conversation end detector: {e}")
+                    
+                    # 次回の会話終了検知をスキップするフラグを設定
+                    session.skip_next_end_detection = True
+                    logger.info("Next conversation end detection will be skipped")
                     
                     if user.role == "傍聴者" and session.ai_conversation_manager:
                         # 傍聴者の場合はAI対話を継続
@@ -1536,6 +1885,13 @@ def api(config):
             logger.error(f"Error in session handler: {e}")
         finally:
             if session.session_id in users_session:
+                # 会話終了検出器のクリーンアップ
+                if session.conversation_end_detector:
+                    try:
+                        await session.conversation_end_detector.cleanup()
+                    except Exception as e:
+                        logger.error(f"Error during conversation end detector cleanup: {e}")
+                
                 # 傍聴者の場合は AI対話を停止
                 if user.role == "傍聴者" and session.ai_conversation_manager:
                     try:
