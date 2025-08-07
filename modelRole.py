@@ -373,7 +373,7 @@ class PatientRoleProvider:
         details['profile'] = get_value('プロフィール', '情報なし')
         details['notes'] = get_value('備考欄', '特になし')
         details['test_status'] = get_value('検査ステータス', '情報なし')
-        details['disclosed_info'] = get_value('検査開始時点で開示されている情報', '情報なし')
+        details['disclosed_info'] = get_value('調査開始時点で開示されている情報', '情報なし')
 
         return details
 
