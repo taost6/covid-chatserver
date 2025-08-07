@@ -85,7 +85,7 @@
         prepend-icon="mdi-stop-circle-outline" 
         variant="outlined"
       >
-        <v-btn @click="$emit('interrupt-session-with-debrief')">対話を中断して評価を実行する</v-btn>
+        <v-btn @click="$emit('interrupt-session-with-debrief')">調査の評価を行う</v-btn>
       </v-list-item>
       
       <v-divider thickness="2" color="block" class="my-3"></v-divider>

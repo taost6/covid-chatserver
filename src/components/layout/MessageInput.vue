@@ -47,7 +47,7 @@
         prepend-icon="mdi-stop-circle-outline"
         class="px-6"
       >
-        対話を中断して評価を実行する
+        調査の評価を行う
       </v-btn>
     </div>
   </v-footer>

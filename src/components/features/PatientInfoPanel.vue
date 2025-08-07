@@ -63,7 +63,7 @@
               v-if="patientStore.patientInfo?.disclosed_info && patientStore.patientInfo.disclosed_info !== '情報なし'" 
               class="bg-cyan-lighten-5 rounded-lg pa-3"
             >
-              <div class="font-weight-bold text-cyan-darken-4 mb-2">検査開始時点で開示されている情報</div>
+              <div class="font-weight-bold text-cyan-darken-4 mb-2">調査開始時点で開示されている情報</div>
               <div style="white-space: pre-wrap;">{{ patientStore.patientInfo.disclosed_info }}</div>
             </v-list-item>
             
