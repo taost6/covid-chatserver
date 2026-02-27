@@ -129,9 +129,9 @@
       
       <v-divider class="my-2"></v-divider>
       
-      <v-list-item 
-        title="このページを印刷する" 
-        prepend-icon="mdi-printer" 
+      <v-list-item
+        title="このページを印刷する"
+        prepend-icon="mdi-printer"
         @click="printPage"
       ></v-list-item>
     </v-list>

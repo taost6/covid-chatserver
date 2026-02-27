@@ -30,6 +30,11 @@ const router = createRouter({
       name: 'prompts',
       component: () => import('@/views/PromptManagementView.vue'),
     },
+    {
+      path: '/irt',
+      name: 'irt',
+      component: () => import('@/views/IRTManagementView.vue'),
+    },
   ],
 });
 
