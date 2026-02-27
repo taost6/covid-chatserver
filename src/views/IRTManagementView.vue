@@ -70,7 +70,7 @@
                           variant="text"
                           @click="showItemTypeDetail(item)"
                         >
-                          詳細
+                          編集
                         </v-btn>
                       </template>
                     </v-data-table>
@@ -251,130 +251,93 @@
       </v-col>
     </v-row>
 
-    <!-- 項目タイプ詳細ダイアログ -->
+    <!-- 項目タイプ編集ダイアログ -->
     <v-dialog v-model="itemTypeDetailDialog" max-width="700">
-      <v-card v-if="selectedItemType">
+      <v-card v-if="editingItemType">
         <v-card-title>
-          {{ selectedItemType.code }}: {{ selectedItemType.name_ja }}
+          {{ editingItemType.code }} を編集
         </v-card-title>
         <v-card-text>
-          <div class="mb-3">
-            <v-chip :color="categoryColor(selectedItemType.category)" size="small" class="mr-2">
-              {{ selectedItemType.category }}
-            </v-chip>
-            <v-chip :color="selectedItemType.status === 'active' ? 'success' : 'warning'" size="small" class="mr-2">
-              {{ selectedItemType.status }}
-            </v-chip>
-            <v-chip v-if="selectedItemType.pdf_priority" size="small" variant="outlined" class="mr-2">
-              優先度: {{ selectedItemType.pdf_priority }}
-            </v-chip>
-            <v-chip v-if="selectedItemType.investigation_phase" size="small" variant="outlined" class="mr-2">
-              {{ selectedItemType.investigation_phase }}
-            </v-chip>
-          </div>
-          <div class="mb-3">
-            <strong>英語名:</strong> {{ selectedItemType.name_en }}
-          </div>
-          <div v-if="selectedItemType.description" class="mb-3">
-            <strong>説明:</strong>
-            <pre class="bg-grey-lighten-4 pa-3 rounded">{{ selectedItemType.description }}</pre>
-          </div>
-          <v-row v-if="selectedItemType.frequency || selectedItemType.intensity" class="mb-3">
-            <v-col v-if="selectedItemType.frequency" cols="auto">
-              <strong>頻度:</strong> {{ selectedItemType.frequency }}
+          <v-text-field v-model="editingItemType.name_ja" label="項目名（日本語）" density="compact" class="mb-2" />
+          <v-text-field v-model="editingItemType.name_en" label="項目名（英語）" density="compact" class="mb-2" />
+          <v-textarea v-model="editingItemType.description" label="説明" rows="4" density="compact" class="mb-2" />
+          <v-row>
+            <v-col cols="6">
+              <v-select v-model="editingItemType.investigation_phase" :items="['Phase-A','Phase-B','Phase-C']" label="調査フェーズ" density="compact" clearable />
             </v-col>
-            <v-col v-if="selectedItemType.intensity" cols="auto">
-              <strong>強度:</strong> {{ selectedItemType.intensity }}
+            <v-col cols="6">
+              <v-select v-model="editingItemType.pdf_priority" :items="['◎','○','△']" label="PDF優先度" density="compact" clearable />
             </v-col>
           </v-row>
-          <div v-if="selectedItemType.investigation_direction" class="mb-3">
-            <strong>調査方向:</strong> {{ selectedItemType.investigation_direction }}
-          </div>
-          <div class="text-caption text-medium-emphasis">
-            カタログバージョン: v{{ selectedItemType.catalog_version }} /
-            作成日: {{ formatDate(selectedItemType.created_at) }}
-          </div>
+          <v-row>
+            <v-col cols="4">
+              <v-select v-model="editingItemType.investigation_direction" :items="['forward','backward','both','none']" label="調査方向" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="editingItemType.frequency" :items="['High','Low','Variable']" label="頻度" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="editingItemType.intensity" :items="['High','Low','Variable']" label="強度" density="compact" clearable />
+            </v-col>
+          </v-row>
+          <v-select v-model="editingItemType.status" :items="['active','candidate','deprecated']" label="状態" density="compact" class="mt-2" />
         </v-card-text>
         <v-card-actions>
+          <v-btn color="error" variant="text" @click="deleteItemType" :loading="savingItemType">削除</v-btn>
           <v-spacer />
-          <v-btn color="primary" @click="itemTypeDetailDialog = false">閉じる</v-btn>
+          <v-btn variant="text" @click="itemTypeDetailDialog = false">キャンセル</v-btn>
+          <v-btn color="primary" @click="saveItemType" :loading="savingItemType">保存</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <!-- インスタンス詳細ダイアログ -->
+    <!-- インスタンス編集ダイアログ -->
     <v-dialog v-model="instanceDetailDialog" max-width="700">
-      <v-card v-if="selectedInstance">
+      <v-card v-if="editingInstance">
         <v-card-title>
-          患者{{ selectedInstance.patient_id }} / {{ selectedInstance.item_type_code }}-{{ circledNumber(selectedInstance.instance_number) }}
+          患者{{ editingInstance.patient_id }} / {{ editingInstance.item_type_code }}-{{ circledNumber(editingInstance.instance_number) }} を編集
         </v-card-title>
         <v-card-text>
-          <div class="mb-3">
-            <v-chip
-              :color="categoryColor(selectedInstance.item_type_code.split('-')[0])"
-              size="small"
-              class="mr-2"
-            >
-              {{ selectedInstance.item_type_code }}
-            </v-chip>
-            <v-chip v-if="selectedInstance.scene_category" size="small" variant="outlined" class="mr-2">
-              {{ selectedInstance.scene_category }}
-            </v-chip>
-            <v-chip v-if="selectedInstance.date" size="small" variant="outlined" class="mr-2">
-              {{ selectedInstance.date }}
-            </v-chip>
-            <v-icon
-              :color="selectedInstance.is_detectable ? 'success' : 'error'"
-              size="small"
-              class="mr-1"
-            >
-              {{ selectedInstance.is_detectable ? 'mdi-check-circle' : 'mdi-close-circle' }}
-            </v-icon>
-            {{ selectedInstance.is_detectable ? '検出可能' : '検出不可能' }}
-          </div>
-          <div v-if="selectedInstance.description" class="mb-3">
-            <strong>説明:</strong>
-            <pre class="bg-grey-lighten-4 pa-3 rounded">{{ selectedInstance.description }}</pre>
-          </div>
-          <div v-if="selectedInstance.investigation_direction_override" class="mb-3">
-            <strong>調査方向:</strong> {{ selectedInstance.investigation_direction_override }}
-          </div>
-          <!-- 3密情報 -->
-          <div
-            v-if="selectedInstance.density_closed || selectedInstance.density_crowded || selectedInstance.density_close_contact"
-            class="mb-3"
-          >
-            <strong>3密条件:</strong>
-            <v-chip v-if="selectedInstance.density_closed" size="x-small" class="mr-1"
-              :color="selectedInstance.density_closed === 'High' ? 'error' : 'default'"
-            >
-              密閉: {{ selectedInstance.density_closed }}
-            </v-chip>
-            <v-chip v-if="selectedInstance.density_crowded" size="x-small" class="mr-1"
-              :color="selectedInstance.density_crowded === 'High' ? 'error' : 'default'"
-            >
-              密集: {{ selectedInstance.density_crowded }}
-            </v-chip>
-            <v-chip v-if="selectedInstance.density_close_contact" size="x-small"
-              :color="selectedInstance.density_close_contact === 'High' ? 'error' : 'default'"
-            >
-              密接: {{ selectedInstance.density_close_contact }}
-            </v-chip>
-          </div>
-          <div v-if="selectedInstance.related_patient_ids" class="mb-3">
-            <strong>関連患者ID:</strong> {{ selectedInstance.related_patient_ids }}
-          </div>
-          <div v-if="selectedInstance.notes" class="mb-3">
-            <strong>備考:</strong> {{ selectedInstance.notes }}
-          </div>
-          <div class="text-caption text-medium-emphasis">
-            カタログバージョン: v{{ selectedInstance.catalog_version }} /
-            作成日: {{ formatDate(selectedInstance.created_at) }}
-          </div>
+          <v-row>
+            <v-col cols="6">
+              <v-select v-model="editingInstance.item_type_code" :items="itemTypeOptions" label="項目タイプ" density="compact" />
+            </v-col>
+            <v-col cols="3">
+              <v-text-field v-model.number="editingInstance.instance_number" label="番号" type="number" min="1" density="compact" />
+            </v-col>
+            <v-col cols="3">
+              <v-text-field v-model="editingInstance.date" label="日付" density="compact" />
+            </v-col>
+          </v-row>
+          <v-textarea v-model="editingInstance.description" label="説明" rows="3" density="compact" class="mb-2" />
+          <v-row>
+            <v-col cols="6">
+              <v-select v-model="editingInstance.scene_category" :items="sceneCategories" label="場面カテゴリ" density="compact" clearable />
+            </v-col>
+            <v-col cols="6">
+              <v-select v-model="editingInstance.investigation_direction_override" :items="['forward','backward','both']" label="調査方向" density="compact" clearable />
+            </v-col>
+          </v-row>
+          <v-row>
+            <v-col cols="4">
+              <v-select v-model="editingInstance.density_closed" :items="['High','Low','Unknown']" label="密閉" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="editingInstance.density_crowded" :items="['High','Low','Unknown']" label="密集" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="editingInstance.density_close_contact" :items="['High','Low','Unknown']" label="密接" density="compact" clearable />
+            </v-col>
+          </v-row>
+          <v-text-field v-model="editingInstance.related_patient_ids" label="関連患者ID (JSON配列)" density="compact" class="mb-2" />
+          <v-checkbox v-model="editingInstance.is_detectable" label="検出可能" density="compact" hide-details class="mb-2" />
+          <v-textarea v-model="editingInstance.notes" label="備考" rows="2" density="compact" />
         </v-card-text>
         <v-card-actions>
+          <v-btn color="error" variant="text" @click="deleteInstance" :loading="savingInstance">削除</v-btn>
           <v-spacer />
-          <v-btn color="primary" @click="instanceDetailDialog = false">閉じる</v-btn>
+          <v-btn variant="text" @click="instanceDetailDialog = false">キャンセル</v-btn>
+          <v-btn color="primary" @click="saveInstance" :loading="savingInstance">保存</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -399,7 +362,6 @@ const itemTypes = ref<IRTItemType[]>([]);
 const loadingItemTypes = ref(false);
 const selectedCategory = ref('');
 const itemTypeDetailDialog = ref(false);
-const selectedItemType = ref<IRTItemType | null>(null);
 
 const categories = [
   { value: 'D', label: 'D: 疾病臨床' },
@@ -422,7 +384,7 @@ const itemTypeHeaders = [
   { title: '優先度', key: 'pdf_priority', width: '80px' },
   { title: 'フェーズ', key: 'investigation_phase', width: '100px' },
   { title: '状態', key: 'status', width: '100px' },
-  { title: 'アクション', key: 'actions', width: '80px', sortable: false },
+  { title: '', key: 'actions', width: '80px', sortable: false },
 ];
 
 // --- 患者インスタンス ---
@@ -430,7 +392,6 @@ const selectedPatientId = ref<string | null>(null);
 const patientInstances = ref<IRTPatientInstance[]>([]);
 const loadingInstances = ref(false);
 const instanceDetailDialog = ref(false);
-const selectedInstance = ref<IRTPatientInstance | null>(null);
 const creatingInstance = ref(false);
 
 const patientIdOptions = computed(() => {
@@ -565,14 +526,88 @@ const createInstance = async () => {
   }
 };
 
+// --- 編集機能 ---
+const editingItemType = ref<Record<string, unknown> | null>(null);
+const savingItemType = ref(false);
+const editingInstance = ref<Record<string, unknown> | null>(null);
+const savingInstance = ref(false);
+
 const showItemTypeDetail = (item: IRTItemType) => {
-  selectedItemType.value = item;
+  editingItemType.value = { ...item };
   itemTypeDetailDialog.value = true;
 };
 
+const saveItemType = async () => {
+  if (!editingItemType.value) return;
+  savingItemType.value = true;
+  try {
+    const id = editingItemType.value.id as number;
+    const { id: _, created_at: __, ...data } = editingItemType.value;
+    await irtApi.updateItemType(id, data);
+    await loadItemTypes();
+    itemTypeDetailDialog.value = false;
+    showSnackbar('項目タイプを更新しました');
+  } catch (error) {
+    console.error('Failed to update item type:', error);
+    showSnackbar('更新に失敗しました', 'error');
+  } finally {
+    savingItemType.value = false;
+  }
+};
+
+const deleteItemType = async () => {
+  if (!editingItemType.value || !confirm('この項目タイプを削除してもよろしいですか？')) return;
+  savingItemType.value = true;
+  try {
+    await irtApi.deleteItemType(editingItemType.value.id as number);
+    await loadItemTypes();
+    itemTypeDetailDialog.value = false;
+    showSnackbar('項目タイプを削除しました');
+  } catch (error) {
+    console.error('Failed to delete item type:', error);
+    showSnackbar('削除に失敗しました', 'error');
+  } finally {
+    savingItemType.value = false;
+  }
+};
+
 const showInstanceDetail = (item: IRTPatientInstance) => {
-  selectedInstance.value = item;
+  editingInstance.value = { ...item };
   instanceDetailDialog.value = true;
+};
+
+const saveInstance = async () => {
+  if (!editingInstance.value) return;
+  savingInstance.value = true;
+  try {
+    const id = editingInstance.value.id as number;
+    const { id: _, created_at: __, ...data } = editingInstance.value;
+    await irtApi.updatePatientInstance(id, data);
+    await loadPatientInstances();
+    instanceDetailDialog.value = false;
+    showSnackbar('インスタンスを更新しました');
+  } catch (error) {
+    console.error('Failed to update instance:', error);
+    showSnackbar('更新に失敗しました', 'error');
+  } finally {
+    savingInstance.value = false;
+  }
+};
+
+const deleteInstance = async () => {
+  if (!editingInstance.value || !confirm('このインスタンスを削除してもよろしいですか？')) return;
+  savingInstance.value = true;
+  try {
+    await irtApi.deletePatientInstance(editingInstance.value.id as number);
+    await loadPatientInstances();
+    instanceDetailDialog.value = false;
+    showSnackbar('インスタンスを削除しました');
+  } catch (error) {
+    console.error('Failed to delete instance:', error);
+    showSnackbar('削除に失敗しました', 'error');
+  } finally {
+    savingInstance.value = false;
+  }
 };
 
 // --- 初期化 ---

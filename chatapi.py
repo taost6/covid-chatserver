@@ -1342,6 +1342,58 @@ def api(config):
         matrix = service.get_scenario_matrix(catalog_version=catalog_version)
         return matrix
 
+    @app.put("/v1/irt/item-types/{item_id}")
+    async def update_irt_item_type(item_id: int, req: dict, db: Session = Depends(get_db)):
+        """IRT項目タイプを更新"""
+        service = IRTItemTypeService(db)
+        it = service.update_item_type(item_id, **req)
+        if not it:
+            raise HTTPException(status_code=404, detail="Item type not found")
+        return IRTItemTypeResponse(
+            id=it.id, catalog_version=it.catalog_version, code=it.code,
+            category=it.category, name_ja=it.name_ja, name_en=it.name_en,
+            description=it.description, investigation_phase=it.investigation_phase,
+            pdf_priority=it.pdf_priority, investigation_direction=it.investigation_direction,
+            frequency=it.frequency, intensity=it.intensity, status=it.status,
+            created_at=it.created_at
+        )
+
+    @app.delete("/v1/irt/item-types/{item_id}")
+    async def delete_irt_item_type(item_id: int, db: Session = Depends(get_db)):
+        """IRT項目タイプを削除"""
+        service = IRTItemTypeService(db)
+        if not service.delete_item_type(item_id):
+            raise HTTPException(status_code=404, detail="Item type not found")
+        return {"deleted": True}
+
+    @app.put("/v1/irt/patient-instances/{instance_id}")
+    async def update_irt_patient_instance(instance_id: int, req: dict, db: Session = Depends(get_db)):
+        """IRT患者インスタンスを更新"""
+        service = IRTPatientInstanceService(db)
+        inst = service.update_instance(instance_id, **req)
+        if not inst:
+            raise HTTPException(status_code=404, detail="Instance not found")
+        return IRTPatientInstanceResponse(
+            id=inst.id, catalog_version=inst.catalog_version, patient_id=inst.patient_id,
+            item_type_code=inst.item_type_code, instance_number=inst.instance_number,
+            date=inst.date, description=inst.description,
+            investigation_direction_override=inst.investigation_direction_override,
+            scene_category=inst.scene_category,
+            density_closed=inst.density_closed, density_crowded=inst.density_crowded,
+            density_close_contact=inst.density_close_contact,
+            related_patient_ids=inst.related_patient_ids,
+            is_detectable=inst.is_detectable, notes=inst.notes,
+            created_at=inst.created_at
+        )
+
+    @app.delete("/v1/irt/patient-instances/{instance_id}")
+    async def delete_irt_patient_instance(instance_id: int, db: Session = Depends(get_db)):
+        """IRT患者インスタンスを削除"""
+        service = IRTPatientInstanceService(db)
+        if not service.delete_instance(instance_id):
+            raise HTTPException(status_code=404, detail="Instance not found")
+        return {"deleted": True}
+
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
         if req.msg_type != MsgType.RegistrationRequest.name:

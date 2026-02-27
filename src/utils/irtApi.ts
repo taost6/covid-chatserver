@@ -93,6 +93,19 @@ export const irtApi = {
     });
   },
 
+  async updateItemType(itemId: number, data: Record<string, unknown>): Promise<IRTItemType> {
+    return await request<IRTItemType>(`${baseUrl()}/v1/irt/item-types/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deleteItemType(itemId: number): Promise<{ deleted: boolean }> {
+    return await request<{ deleted: boolean }>(`${baseUrl()}/v1/irt/item-types/${itemId}`, {
+      method: 'DELETE',
+    });
+  },
+
   // 患者インスタンス
   async getPatientInstances(patientId: string, catalogVersion?: number): Promise<IRTPatientInstance[]> {
     const query = catalogVersion ? `?catalog_version=${catalogVersion}` : '';
@@ -103,6 +116,19 @@ export const irtApi = {
     return await request<{ created: number }>(`${baseUrl()}/v1/irt/patient-instances/bulk`, {
       method: 'POST',
       body: JSON.stringify({ instances }),
+    });
+  },
+
+  async updatePatientInstance(instanceId: number, data: Record<string, unknown>): Promise<IRTPatientInstance> {
+    return await request<IRTPatientInstance>(`${baseUrl()}/v1/irt/patient-instances/${instanceId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async deletePatientInstance(instanceId: number): Promise<{ deleted: boolean }> {
+    return await request<{ deleted: boolean }>(`${baseUrl()}/v1/irt/patient-instances/${instanceId}`, {
+      method: 'DELETE',
     });
   },
 

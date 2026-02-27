@@ -113,6 +113,25 @@ class IRTItemTypeService:
         self.db.refresh(item_type)
         return item_type
 
+    def update_item_type(self, item_id: int, **kwargs) -> Optional[IRTItemType]:
+        item = self.db.query(IRTItemType).filter(IRTItemType.id == item_id).first()
+        if not item:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(item, key) and key not in ('id', 'created_at'):
+                setattr(item, key, value)
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def delete_item_type(self, item_id: int) -> bool:
+        item = self.db.query(IRTItemType).filter(IRTItemType.id == item_id).first()
+        if not item:
+            return False
+        self.db.delete(item)
+        self.db.commit()
+        return True
+
     def bulk_create_item_types(self, items: List[dict]) -> List[IRTItemType]:
         item_types = [IRTItemType(**item) for item in items]
         self.db.add_all(item_types)
@@ -173,6 +192,27 @@ class IRTPatientInstanceService:
         self.db.commit()
         self.db.refresh(instance)
         return instance
+
+    def update_instance(self, instance_id: int, **kwargs) -> Optional[IRTPatientInstance]:
+        inst = self.db.query(IRTPatientInstance).filter(IRTPatientInstance.id == instance_id).first()
+        if not inst:
+            return None
+        for key, value in kwargs.items():
+            if hasattr(inst, key) and key not in ('id', 'created_at'):
+                if key == 'related_patient_ids' and isinstance(value, list):
+                    value = json.dumps(value)
+                setattr(inst, key, value)
+        self.db.commit()
+        self.db.refresh(inst)
+        return inst
+
+    def delete_instance(self, instance_id: int) -> bool:
+        inst = self.db.query(IRTPatientInstance).filter(IRTPatientInstance.id == instance_id).first()
+        if not inst:
+            return False
+        self.db.delete(inst)
+        self.db.commit()
+        return True
 
     def bulk_create_instances(self, instances: List[dict]) -> List[IRTPatientInstance]:
         for inst in instances:
