@@ -50,11 +50,6 @@
                           {{ item.category }}
                         </v-chip>
                       </template>
-                      <template #item.pdf_priority="{ item }">
-                        <span v-if="item.pdf_priority" :class="priorityClass(item.pdf_priority)">
-                          {{ item.pdf_priority }}
-                        </span>
-                      </template>
                       <template #item.status="{ item }">
                         <v-chip
                           :color="item.status === 'active' ? 'success' : item.status === 'candidate' ? 'warning' : 'default'"
@@ -258,17 +253,8 @@
           {{ editingItemType.code }} を編集
         </v-card-title>
         <v-card-text>
-          <v-text-field v-model="editingItemType.name_ja" label="項目名（日本語）" density="compact" class="mb-2" />
-          <v-text-field v-model="editingItemType.name_en" label="項目名（英語）" density="compact" class="mb-2" />
+          <v-text-field v-model="editingItemType.name_ja" label="項目名" density="compact" class="mb-2" />
           <v-textarea v-model="editingItemType.description" label="説明" rows="4" density="compact" class="mb-2" />
-          <v-row>
-            <v-col cols="6">
-              <v-select v-model="editingItemType.investigation_phase" :items="['Phase-A','Phase-B','Phase-C']" label="調査フェーズ" density="compact" clearable />
-            </v-col>
-            <v-col cols="6">
-              <v-select v-model="editingItemType.pdf_priority" :items="['◎','○','△']" label="PDF優先度" density="compact" clearable />
-            </v-col>
-          </v-row>
           <v-row>
             <v-col cols="4">
               <v-select v-model="editingItemType.investigation_direction" :items="['forward','backward','both','none']" label="調査方向" density="compact" clearable />
@@ -381,8 +367,6 @@ const itemTypeHeaders = [
   { title: 'コード', key: 'code', width: '90px' },
   { title: 'カテゴリ', key: 'category', width: '90px' },
   { title: '項目名', key: 'name_ja' },
-  { title: '優先度', key: 'pdf_priority', width: '80px' },
-  { title: 'フェーズ', key: 'investigation_phase', width: '100px' },
   { title: '状態', key: 'status', width: '100px' },
   { title: '', key: 'actions', width: '80px', sortable: false },
 ];
@@ -453,12 +437,6 @@ const categoryColor = (cat: string): string => {
     D: 'blue', T: 'green', U: 'orange', P: 'purple', E: 'teal', I: 'grey',
   };
   return colors[cat] || 'default';
-};
-
-const priorityClass = (priority: string): string => {
-  if (priority === '◎') return 'font-weight-bold text-error';
-  if (priority === '○') return 'text-warning';
-  return 'text-grey';
 };
 
 // --- API呼び出し ---
