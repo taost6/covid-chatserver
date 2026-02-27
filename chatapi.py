@@ -22,6 +22,7 @@ from modelRole import PatientRoleProvider
 import modelDatabase
 from modelSession import Session as SessionModel # New
 from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
+from modelIRT import IRTItemType, IRTItemTypeService, IRTPatientInstance, IRTPatientInstanceService
 from modelDatabase import db_retry
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
@@ -242,6 +243,47 @@ class PromptTemplateResponse(BaseModel):
     description: Optional[str]
     is_active: bool
     created_at: datetime
+
+# --- IRT Pydantic Models ---
+class IRTItemTypeResponse(BaseModel):
+    id: int
+    catalog_version: int
+    code: str
+    category: str
+    name_ja: str
+    name_en: str
+    description: Optional[str]
+    investigation_phase: Optional[str]
+    pdf_priority: Optional[str]
+    investigation_direction: Optional[str]
+    frequency: Optional[str]
+    intensity: Optional[str]
+    status: str
+    created_at: datetime
+
+class IRTPatientInstanceResponse(BaseModel):
+    id: int
+    catalog_version: int
+    patient_id: str
+    item_type_code: str
+    instance_number: int
+    date: Optional[str]
+    description: Optional[str]
+    investigation_direction_override: Optional[str]
+    scene_category: Optional[str]
+    density_closed: Optional[str]
+    density_crowded: Optional[str]
+    density_close_contact: Optional[str]
+    related_patient_ids: Optional[str]
+    is_detectable: bool
+    notes: Optional[str]
+    created_at: datetime
+
+class IRTItemTypeBulkRequest(BaseModel):
+    items: List[dict]
+
+class IRTPatientInstanceBulkRequest(BaseModel):
+    instances: List[dict]
 
 # --- Global State ---
 users_waiting = {}
@@ -1212,6 +1254,93 @@ def api(config):
             is_active=template.is_active,
             created_at=template.created_at
         )
+
+    # --- IRT Item Catalog API ---
+    @app.get("/v1/irt/item-types")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    async def get_irt_item_types(
+        catalog_version: Optional[int] = None,
+        category: Optional[str] = None,
+        status: Optional[str] = None,
+        db: Session = Depends(get_db)
+    ):
+        """IRT項目タイプ一覧を取得"""
+        service = IRTItemTypeService(db)
+        items = service.get_all_item_types(catalog_version=catalog_version, category=category, status=status)
+        return [
+            IRTItemTypeResponse(
+                id=it.id, catalog_version=it.catalog_version, code=it.code,
+                category=it.category, name_ja=it.name_ja, name_en=it.name_en,
+                description=it.description, investigation_phase=it.investigation_phase,
+                pdf_priority=it.pdf_priority, investigation_direction=it.investigation_direction,
+                frequency=it.frequency, intensity=it.intensity, status=it.status,
+                created_at=it.created_at
+            ) for it in items
+        ]
+
+    @app.get("/v1/irt/item-types/{code}")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    async def get_irt_item_type(code: str, catalog_version: Optional[int] = None, db: Session = Depends(get_db)):
+        """コードでIRT項目タイプを取得"""
+        service = IRTItemTypeService(db)
+        it = service.get_item_type_by_code(code, catalog_version=catalog_version)
+        if not it:
+            raise HTTPException(status_code=404, detail="Item type not found")
+        return IRTItemTypeResponse(
+            id=it.id, catalog_version=it.catalog_version, code=it.code,
+            category=it.category, name_ja=it.name_ja, name_en=it.name_en,
+            description=it.description, investigation_phase=it.investigation_phase,
+            pdf_priority=it.pdf_priority, investigation_direction=it.investigation_direction,
+            frequency=it.frequency, intensity=it.intensity, status=it.status,
+            created_at=it.created_at
+        )
+
+    @app.post("/v1/irt/item-types/bulk")
+    async def bulk_create_irt_item_types(req: IRTItemTypeBulkRequest, db: Session = Depends(get_db)):
+        """IRT項目タイプを一括登録"""
+        service = IRTItemTypeService(db)
+        created = service.bulk_create_item_types(req.items)
+        return {"created": len(created)}
+
+    @app.get("/v1/irt/patient-instances/{patient_id}")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    async def get_irt_patient_instances(
+        patient_id: str,
+        catalog_version: Optional[int] = None,
+        db: Session = Depends(get_db)
+    ):
+        """患者IDでIRTインスタンス一覧を取得"""
+        service = IRTPatientInstanceService(db)
+        instances = service.get_instances_for_patient(patient_id, catalog_version=catalog_version)
+        return [
+            IRTPatientInstanceResponse(
+                id=inst.id, catalog_version=inst.catalog_version, patient_id=inst.patient_id,
+                item_type_code=inst.item_type_code, instance_number=inst.instance_number,
+                date=inst.date, description=inst.description,
+                investigation_direction_override=inst.investigation_direction_override,
+                scene_category=inst.scene_category,
+                density_closed=inst.density_closed, density_crowded=inst.density_crowded,
+                density_close_contact=inst.density_close_contact,
+                related_patient_ids=inst.related_patient_ids,
+                is_detectable=inst.is_detectable, notes=inst.notes,
+                created_at=inst.created_at
+            ) for inst in instances
+        ]
+
+    @app.post("/v1/irt/patient-instances/bulk")
+    async def bulk_create_irt_patient_instances(req: IRTPatientInstanceBulkRequest, db: Session = Depends(get_db)):
+        """IRT患者インスタンスを一括登録"""
+        service = IRTPatientInstanceService(db)
+        created = service.bulk_create_instances(req.instances)
+        return {"created": len(created)}
+
+    @app.get("/v1/irt/scenario-matrix")
+    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
+    async def get_irt_scenario_matrix(catalog_version: Optional[int] = None, db: Session = Depends(get_db)):
+        """シナリオ×項目マトリクスを取得"""
+        service = IRTPatientInstanceService(db)
+        matrix = service.get_scenario_matrix(catalog_version=catalog_version)
+        return matrix
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
