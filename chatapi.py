@@ -108,23 +108,21 @@ class ConversationEndDetector:
                 # 会話終了検出ツール定義
                 detection_tool = {
                     "type": "function",
-                    "function": {
-                        "name": "detect_conversation_end",
-                        "description": "会話が自然に終了したと判断される場合に呼び出します",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "confidence": {
-                                    "type": "number",
-                                    "description": "会話終了の確信度（0.0-1.0）"
-                                },
-                                "reason": {
-                                    "type": "string",
-                                    "description": "終了判定の理由"
-                                }
+                    "name": "detect_conversation_end",
+                    "description": "会話が自然に終了したと判断される場合に呼び出します",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confidence": {
+                                "type": "number",
+                                "description": "会話終了の確信度（0.0-1.0）"
                             },
-                            "required": ["confidence", "reason"]
-                        }
+                            "reason": {
+                                "type": "string",
+                                "description": "終了判定の理由"
+                            }
+                        },
+                        "required": ["confidence", "reason"]
                     }
                 }
                 
@@ -138,9 +136,9 @@ class ConversationEndDetector:
                     max_retries=1  # 高速化のためリトライ回数を削減
                 )
                 
-                if tool_call and tool_call.function.name == "detect_conversation_end":
+                if tool_call and tool_call.name == "detect_conversation_end":
                     try:
-                        args = json.loads(tool_call.function.arguments)
+                        args = json.loads(tool_call.arguments)
                         confidence = args.get("confidence", 0.0)
                         reason = args.get("reason", "")
                         
@@ -497,57 +495,55 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
     # Function Calling用のツール定義
     debriefing_tool = {
         "type": "function",
-        "function": {
-            "name": "submit_debriefing_report",
-            "description": "ユーザー（保健師役）の聞き取りスキルに関する評価レポートを提出します。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "overall_score": {
-                        "type": "integer",
-                        "description": "総合評価（100点満点）"
-                    },
-                    "information_retrieval_ratio": {
-                        "type": "string",
-                        "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの評価。詳細なフィードバックをお願いします。"
-                    },
-                    "information_quality": {
-                        "type": "string",
-                        "description": "患者役が回答した情報の質。どれだけ効率的に情報を引き出せたかの指標。詳細なフィードバックをお願いします。"
-                    },
-                    "micro_evaluations": {
-                        "type": "array",
-                        "description": "ユーザーの個々の発言に対するミクロな評価のリスト。",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "utterance": {"type": "string", "description": "評価対象のユーザーの発言"},
-                                "evaluation_symbol": {"type": "string", "enum": ["◎", "○", "△", "✕"], "description": "記号による評価"},
-                                "advice": {"type": "string", "description": "具体的なアドバイス"}
-                            },
-                            "required": ["utterance", "evaluation_symbol", "advice"]
-                        }
-                    },
-                    "missed_points": {
-                        "type": "array",
-                        "description": "保健師が聞き出せなかった重要なポイントのリスト。患者の設定情報（正解データ）と対話履歴を詳細に比較し、感染経路追跡や濃厚接触者特定に必要だが聞き取れなかった情報を具体的に指摘する。抽象的な指摘ではなく、実際の日付、場所、人物名、行動内容などの具体的な情報を明記すること。ただし、評価の対象とする条件は次の通りです。これらすべてを同時に満たす場合のみ出力してください。そのうえで、特に聞き漏らしがなければ何も出力しないでください。1. 患者情報として与えられている情報であること。2. 感染経路調査上重要と思われること。3. 聞き出せなかった情報であること。",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "category": {"type": "string", "description": "カテゴリ（例：発症経緯、行動履歴、接触者情報、症状詳細、感染源調査など）"},
-                                "detail": {"type": "string", "description": "具体的に聞き出せなかった情報の内容。抽象的な表現ではなく、実際の日付、時刻、場所名、人物名、行動の詳細など、患者の設定情報に含まれている具体的な事実を明記すること。例：「4月5日の午後にA店で30分間滞在したこと」「同居家族のB氏が4月3日に発熱していたこと」など。"},
-                                "importance": {"type": "string", "enum": ["高", "中", "低"], "description": "疫学調査における重要度"}
-                            },
-                            "required": ["category", "detail", "importance"]
-                        }
-                    },
-                    "overall_comment": {
-                        "type": "string",
-                        "description": "全体的な総評。"
+        "name": "submit_debriefing_report",
+        "description": "ユーザー（保健師役）の聞き取りスキルに関する評価レポートを提出します。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "overall_score": {
+                    "type": "integer",
+                    "description": "総合評価（100点満点）"
+                },
+                "information_retrieval_ratio": {
+                    "type": "string",
+                    "description": "感染経路の特定や濃厚接触者の把握に繋がる重要な情報を、これまでの会話からどの程度の割合で聴取できたかの評価。詳細なフィードバックをお願いします。"
+                },
+                "information_quality": {
+                    "type": "string",
+                    "description": "患者役が回答した情報の質。どれだけ効率的に情報を引き出せたかの指標。詳細なフィードバックをお願いします。"
+                },
+                "micro_evaluations": {
+                    "type": "array",
+                    "description": "ユーザーの個々の発言に対するミクロな評価のリスト。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "utterance": {"type": "string", "description": "評価対象のユーザーの発言"},
+                            "evaluation_symbol": {"type": "string", "enum": ["◎", "○", "△", "✕"], "description": "記号による評価"},
+                            "advice": {"type": "string", "description": "具体的なアドバイス"}
+                        },
+                        "required": ["utterance", "evaluation_symbol", "advice"]
                     }
                 },
-                "required": ["overall_score", "information_retrieval_ratio", "information_quality", "micro_evaluations", "missed_points", "overall_comment"]
-            }
+                "missed_points": {
+                    "type": "array",
+                    "description": "保健師が聞き出せなかった重要なポイントのリスト。患者の設定情報（正解データ）と対話履歴を詳細に比較し、感染経路追跡や濃厚接触者特定に必要だが聞き取れなかった情報を具体的に指摘する。抽象的な指摘ではなく、実際の日付、場所、人物名、行動内容などの具体的な情報を明記すること。ただし、評価の対象とする条件は次の通りです。これらすべてを同時に満たす場合のみ出力してください。そのうえで、特に聞き漏らしがなければ何も出力しないでください。1. 患者情報として与えられている情報であること。2. 感染経路調査上重要と思われること。3. 聞き出せなかった情報であること。",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "category": {"type": "string", "description": "カテゴリ（例：発症経緯、行動履歴、接触者情報、症状詳細、感染源調査など）"},
+                            "detail": {"type": "string", "description": "具体的に聞き出せなかった情報の内容。抽象的な表現ではなく、実際の日付、時刻、場所名、人物名、行動の詳細など、患者の設定情報に含まれている具体的な事実を明記すること。例：「4月5日の午後にA店で30分間滞在したこと」「同居家族のB氏が4月3日に発熱していたこと」など。"},
+                            "importance": {"type": "string", "enum": ["高", "中", "低"], "description": "疫学調査における重要度"}
+                        },
+                        "required": ["category", "detail", "importance"]
+                    }
+                },
+                "overall_comment": {
+                    "type": "string",
+                    "description": "全体的な総評。"
+                }
+            },
+            "required": ["overall_score", "information_retrieval_ratio", "information_quality", "micro_evaluations", "missed_points", "overall_comment"]
         }
     }
 
@@ -730,7 +726,7 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             debriefing_assistant,
             final_instruction,
             tools=[debriefing_tool],
-            tool_choice={"type": "function", "function": {"name": "submit_debriefing_report"}},
+            tool_choice="required",
             max_retries=5  # 評価者AIは重要なので、より多くのリトライを許可
         )
         
@@ -738,17 +734,17 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         # logger.info(f"[DEBRIEFING DEBUG] Response text: {response_text}")
         # logger.info(f"[DEBRIEFING DEBUG] Tool call received: {tool_call is not None}")
         # if tool_call:
-        #     logger.info(f"[DEBRIEFING DEBUG] Tool call function name: {tool_call.function.name}")
-        #     logger.info(f"[DEBRIEFING DEBUG] Tool call arguments length: {len(tool_call.function.arguments)} chars")
+        #     logger.info(f"[DEBRIEFING DEBUG] Tool call function name: {tool_call.name}")
+        #     logger.info(f"[DEBRIEFING DEBUG] Tool call arguments length: {len(tool_call.arguments)} chars")
 
         debriefing_data = None
-        if tool_call and tool_call.function.name == "submit_debriefing_report":
+        if tool_call and tool_call.name == "submit_debriefing_report":
             # logger.info(f"[DEBRIEFING DEBUG] Processing tool call 'submit_debriefing_report'")
             # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL START ===")
-            # logger.info(f"[DEBRIEFING DATA] {tool_call.function.arguments}")
+            # logger.info(f"[DEBRIEFING DATA] {tool_call.arguments}")
             # logger.info(f"[DEBRIEFING DATA] === LLM RESPONSE FULL END ===")
             try:
-                args = json.loads(tool_call.function.arguments)
+                args = json.loads(tool_call.arguments)
                 # logger.info(f"[DEBRIEFING DEBUG] JSON parsing successful")
                 # logger.info(f"[DEBRIEFING DEBUG] Parsed data keys: {list(args.keys()) if isinstance(args, dict) else 'Not a dict'}")
                 
@@ -766,13 +762,13 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"[DEBRIEFING DEBUG] JSON parsing failed: {e}")
                 logger.error(f"[DEBRIEFING DEBUG] Failed to parse debriefing tool call arguments: {e}")
-                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (first 500 chars): {tool_call.function.arguments[:500] if tool_call.function.arguments else 'None'}")
-                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (last 500 chars): {tool_call.function.arguments[-500:] if tool_call.function.arguments and len(tool_call.function.arguments) > 500 else 'N/A'}")
-                logger.error(f"[DEBRIEFING DEBUG] Arguments length: {len(tool_call.function.arguments) if tool_call.function.arguments else 0}")
-                
+                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (first 500 chars): {tool_call.arguments[:500] if tool_call.arguments else 'None'}")
+                logger.error(f"[DEBRIEFING DEBUG] Raw arguments (last 500 chars): {tool_call.arguments[-500:] if tool_call.arguments and len(tool_call.arguments) > 500 else 'N/A'}")
+                logger.error(f"[DEBRIEFING DEBUG] Arguments length: {len(tool_call.arguments) if tool_call.arguments else 0}")
+
                 # エラー位置周辺の文字を確認
-                if tool_call.function.arguments and len(tool_call.function.arguments) > 1911:
-                    error_context = tool_call.function.arguments[1900:1920]
+                if tool_call.arguments and len(tool_call.arguments) > 1911:
+                    error_context = tool_call.arguments[1900:1920]
                     logger.error(f"[DEBRIEFING DEBUG] Error context around char 1912: '{error_context}'")
                 
                 import traceback
@@ -781,7 +777,7 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
                 # 部分的なJSON修復を試行
                 try:
                     # 不完全なJSONの場合、閉じ括弧を追加して修復を試みる
-                    raw_args = tool_call.function.arguments.strip()
+                    raw_args = tool_call.arguments.strip()
                     if raw_args and not raw_args.endswith('}'):
                         logger.info("[DEBRIEFING DEBUG] Attempting to repair incomplete JSON...")
                         # 最後の完全なフィールドまでを取得
@@ -806,7 +802,7 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             # logger.error(f"[DEBRIEFING DEBUG] Unexpected tool call result")
             # logger.error(f"[DEBRIEFING DEBUG] tool_call is None: {tool_call is None}")
             # if tool_call:
-            #     logger.error(f"[DEBRIEFING DEBUG] tool_call.function.name: {getattr(tool_call.function, 'name', 'No name attribute')}")
+            #     logger.error(f"[DEBRIEFING DEBUG] tool_call.name: {getattr(tool_call, 'name', 'No name attribute')}")
             logger.error(f"Debriefing failed. Expected tool call 'submit_debriefing_report' but got: {tool_call}")
             debriefing_data = {"error": "評価レポートの生成に失敗しました。（理由: AIが評価データを生成できませんでした）"}
 
@@ -963,7 +959,7 @@ def api(config):
         """データベースからセッション情報を取得（リトライ機能付き）"""
         return db.query(SessionModel).filter(
             SessionModel.session_id == session_id,
-            SessionModel.status == 'active'
+            SessionModel.status.in_(['active', 'completed'])
         ).first()
 
     @app.get("/v1/session/{session_id}")
@@ -1514,28 +1510,26 @@ def api(config):
         # 5. Function Calling ツール定義
         irt_judgment_tool = {
             "type": "function",
-            "function": {
-                "name": "submit_irt_judgments",
-                "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "judgments": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
-                                    "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
-                                    "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
-                                    "reasoning": {"type": "string", "description": "判定の根拠"}
-                                },
-                                "required": ["instance_id", "is_correct", "confidence", "reasoning"]
-                            }
+            "name": "submit_irt_judgments",
+            "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "judgments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
+                                "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
+                                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
+                                "reasoning": {"type": "string", "description": "判定の根拠"}
+                            },
+                            "required": ["instance_id", "is_correct", "confidence", "reasoning"]
                         }
-                    },
-                    "required": ["judgments"]
-                }
+                    }
+                },
+                "required": ["judgments"]
             }
         }
 
@@ -1576,14 +1570,14 @@ def api(config):
                 judgment_assistant,
                 final_instruction,
                 tools=[irt_judgment_tool],
-                tool_choice={"type": "function", "function": {"name": "submit_irt_judgments"}},
+                tool_choice="required",
                 max_retries=5
             )
 
-            if not tool_call or tool_call.function.name != "submit_irt_judgments":
+            if not tool_call or tool_call.name != "submit_irt_judgments":
                 raise HTTPException(status_code=500, detail="LLM did not return expected tool call")
 
-            result = json.loads(tool_call.function.arguments)
+            result = json.loads(tool_call.arguments)
             llm_judgments = result.get("judgments", [])
             logger.info(f"LLM returned {len(llm_judgments)} judgments for session {session_id}")
 
@@ -1678,6 +1672,9 @@ def api(config):
         patient_ids: List[str]
         runs_per_patient: int = 1
         concurrency: int = 2
+        nurse_model: str = "gpt-4.1"
+        patient_model: str = "gpt-4.1"
+        evaluator_model: str = "gpt-4.1"
 
     @app.post("/v1/irt/batch/start")
     async def start_irt_batch(req: BatchStartRequest):
@@ -1690,10 +1687,13 @@ def api(config):
             raise HTTPException(status_code=400, detail="concurrency must be >= 1")
 
         batch_id = await batch_runner.start_batch(
-            req.patient_ids, req.runs_per_patient, req.concurrency
+            req.patient_ids, req.runs_per_patient, req.concurrency,
+            nurse_model=req.nurse_model,
+            patient_model=req.patient_model,
+            evaluator_model=req.evaluator_model
         )
         total = len(req.patient_ids) * req.runs_per_patient
-        logger.info(f"IRT batch started: batch_id={batch_id} total={total}")
+        logger.info(f"IRT batch started: batch_id={batch_id} total={total} models=nurse:{req.nurse_model}/patient:{req.patient_model}/eval:{req.evaluator_model}")
         return {"batch_id": batch_id, "total_tasks": total}
 
     @app.get("/v1/irt/batch/status/{batch_id}")
@@ -2003,14 +2003,14 @@ def api(config):
 
                     elif assistant.role == "保健師":
                         if prompt_needed:
-                            # 患者の感染日/発症日に基づいて面接日を計算（共通メソッド使用）
+                            # 患者データから面接日を取得
                             patient_id_for_ai = user.target_patient_id or "1"
-                            interview_date_str = role_provider.calculate_interview_date(patient_id_for_ai)
-                            
+                            _, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+
                             db_session.interview_date = interview_date_str
                             db.commit()
 
-                            prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks()
+                            prompt_chunks, initial_bot_message = role_provider.get_interviewer_prompt_chunks(interview_date_str)
                             for chunk in prompt_chunks:
                                 await oaw.add_message_to_thread(assistant.thread_id, chunk)
                                 history.history.append(MessageInfo(role="system", text=chunk))
@@ -2234,9 +2234,9 @@ def api(config):
                                 logger.info(f"Re-sending message to new thread {new_thread_id}")
                                 response_msg, tool_call = await oaw.send_message(peer, m.user_msg, max_retries=3)
 
-                            if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
+                            if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
                                 # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す
-                                logger.info(f"Tool call detected: {tool_call.function.name}. Notifying client...")
+                                logger.info(f"Tool call detected: {tool_call.name}. Notifying client...")
                                 await user.ws.send_json(ConversationEndChoices(session_id=session.session_id).model_dump())
                             elif response_msg:
                                 if response_msg.startswith("FAILED:"):

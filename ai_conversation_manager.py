@@ -246,7 +246,7 @@ class AIConversationManager:
                         )
                         self.last_api_duration = time.time() - api_start_time
                     
-                        if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
+                        if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
                             # 対話終了の選択肢を送信
                             from modelChat import ConversationEndChoices
                             message_data = ConversationEndChoices(session_id=self.session.session_id).dict()

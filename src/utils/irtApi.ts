@@ -212,6 +212,9 @@ export const irtApi = {
     patientIds: string[],
     runsPerPatient: number,
     concurrency: number,
+    nurseModel: string = 'gpt-4.1',
+    patientModel: string = 'gpt-4.1',
+    evaluatorModel: string = 'gpt-4.1',
   ): Promise<BatchStartResponse> {
     return await request<BatchStartResponse>(`${baseUrl()}/v1/irt/batch/start`, {
       method: 'POST',
@@ -219,6 +222,9 @@ export const irtApi = {
         patient_ids: patientIds,
         runs_per_patient: runsPerPatient,
         concurrency,
+        nurse_model: nurseModel,
+        patient_model: patientModel,
+        evaluator_model: evaluatorModel,
       }),
     });
   },

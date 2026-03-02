@@ -28,10 +28,13 @@ class HeadlessConversation:
 
     MAX_TURNS = 30
 
-    def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, db):
+    def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, db,
+                 nurse_model: Optional[str] = None, patient_model: Optional[str] = None):
         self.oaw = oaw
         self.role_provider = role_provider
         self.db = db
+        self.nurse_model = nurse_model
+        self.patient_model = patient_model
 
     async def run(self, patient_id: str, session_id: str) -> dict:
         """1セッション分の対話を実行して結果を返す"""
@@ -104,6 +107,17 @@ class HeadlessConversation:
             )
 
             # 4. 対話ループ
+            # 保健師AI用の会話終了ツール定義
+            end_conversation_tool = {
+                "type": "function",
+                "name": "end_conversation_and_start_debriefing",
+                "description": "聞き取り調査が完了したと判断した場合に呼び出す。会話を終了し評価を開始する。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                }
+            }
+
             history: List[Dict[str, str]] = [
                 {"role": "患者", "text": initial_patient_message},
                 {"role": "保健師", "text": initial_nurse_message},
@@ -125,24 +139,20 @@ class HeadlessConversation:
                 if not last_message:
                     break
 
+                current_model = self.patient_model if current_ai.role == "患者" else self.nurse_model
                 response_msg, tool_call = await self.oaw.send_message(
                     current_ai, last_message,
-                    tools=[] if current_ai.role == "患者" else None,
-                    max_retries=5
+                    tools=[] if current_ai.role == "患者" else [end_conversation_tool],
+                    max_retries=5,
+                    model=current_model
                 )
 
-                if tool_call and tool_call.function.name == "end_conversation_and_start_debriefing":
+                if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
                     ended_by = "tool_call"
                     logger.info(f"[Batch] Session {session_id}: conversation ended by tool_call at turn {turn_count}")
                     break
 
                 if response_msg and not response_msg.startswith("FAILED:"):
-                    # function call テキスト除去
-                    if "end_conversation_and_start_debriefing" in response_msg.lower():
-                        ended_by = "tool_call_text"
-                        logger.info(f"[Batch] Session {session_id}: conversation ended by tool_call text at turn {turn_count}")
-                        break
-
                     cleaned = response_msg.strip()
                     if len(cleaned) < 3:
                         continue
@@ -185,7 +195,9 @@ class IRTBatchRunner:
         self.role_provider = role_provider
         self.batches: Dict[str, dict] = {}  # batch_id -> state
 
-    async def start_batch(self, patient_ids: List[str], runs_per_patient: int, concurrency: int) -> str:
+    async def start_batch(self, patient_ids: List[str], runs_per_patient: int, concurrency: int,
+                          nurse_model: Optional[str] = None, patient_model: Optional[str] = None,
+                          evaluator_model: Optional[str] = None) -> str:
         batch_id = get_id()
         total = len(patient_ids) * runs_per_patient
 
@@ -199,6 +211,9 @@ class IRTBatchRunner:
             "results": [],
             "task": None,
             "cancel_event": asyncio.Event(),
+            "nurse_model": nurse_model,
+            "patient_model": patient_model,
+            "evaluator_model": evaluator_model,
         }
         self.batches[batch_id] = state
 
@@ -252,12 +267,19 @@ class IRTBatchRunner:
                         status='active',
                         patient_version=patient_tmpl.version if patient_tmpl else None,
                         interviewer_version=interviewer_tmpl.version if interviewer_tmpl else None,
+                        patient_model=state["patient_model"],
+                        interviewer_model=state["nurse_model"],
+                        evaluator_model=state["evaluator_model"],
                     )
                     db.add(db_session)
                     db.commit()
 
                     # ヘッドレス対話実行
-                    conv = HeadlessConversation(self.oaw, self.role_provider, db)
+                    conv = HeadlessConversation(
+                        self.oaw, self.role_provider, db,
+                        nurse_model=state["nurse_model"],
+                        patient_model=state["patient_model"]
+                    )
                     conv_result = await conv.run(patient_id, session_id)
 
                     # セッション完了
@@ -268,7 +290,9 @@ class IRTBatchRunner:
                     db.commit()
 
                     # IRT判定実行
-                    judgment_result = await self._execute_irt_judgment_for_batch(session_id, db)
+                    judgment_result = await self._execute_irt_judgment_for_batch(
+                        session_id, db, evaluator_model=state["evaluator_model"]
+                    )
 
                     result_entry["status"] = "completed"
                     result_entry["correct_count"] = judgment_result.get("correct_count", 0)
@@ -312,7 +336,8 @@ class IRTBatchRunner:
             f"completed={state['completed']} failed={state['failed']} total={state['total']}"
         )
 
-    async def _execute_irt_judgment_for_batch(self, session_id: str, db) -> dict:
+    async def _execute_irt_judgment_for_batch(self, session_id: str, db,
+                                               evaluator_model: Optional[str] = None) -> dict:
         """バッチ用IRT判定（chatapi._execute_irt_judgmentのロジックを再利用）"""
 
         session_record = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
@@ -377,28 +402,26 @@ class IRTBatchRunner:
 
         irt_judgment_tool = {
             "type": "function",
-            "function": {
-                "name": "submit_irt_judgments",
-                "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "judgments": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
-                                    "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
-                                    "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
-                                    "reasoning": {"type": "string", "description": "判定の根拠"}
-                                },
-                                "required": ["instance_id", "is_correct", "confidence", "reasoning"]
-                            }
+            "name": "submit_irt_judgments",
+            "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "judgments": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
+                                "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
+                                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
+                                "reasoning": {"type": "string", "description": "判定の根拠"}
+                            },
+                            "required": ["instance_id", "is_correct", "confidence", "reasoning"]
                         }
-                    },
-                    "required": ["judgments"]
-                }
+                    }
+                },
+                "required": ["judgments"]
             }
         }
 
@@ -425,14 +448,15 @@ class IRTBatchRunner:
             response_text, tool_call = await self.oaw.send_message(
                 judgment_assistant, final_instruction,
                 tools=[irt_judgment_tool],
-                tool_choice={"type": "function", "function": {"name": "submit_irt_judgments"}},
-                max_retries=5
+                tool_choice="required",
+                max_retries=5,
+                model=evaluator_model
             )
 
-            if not tool_call or tool_call.function.name != "submit_irt_judgments":
+            if not tool_call or tool_call.name != "submit_irt_judgments":
                 raise RuntimeError("LLM did not return expected tool call for IRT judgment")
 
-            result = json.loads(tool_call.function.arguments)
+            result = json.loads(tool_call.arguments)
             llm_judgments = result.get("judgments", [])
         finally:
             if judgment_thread_id:

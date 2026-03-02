@@ -301,6 +301,38 @@
                             </v-btn>
                           </v-col>
                         </v-row>
+                        <v-row class="mt-1">
+                          <v-col cols="12" sm="4">
+                            <v-select
+                              v-model="batchNurseModel"
+                              :items="modelOptions"
+                              label="保健師AIモデル"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-select
+                              v-model="batchPatientModel"
+                              :items="modelOptions"
+                              label="患者AIモデル"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                          <v-col cols="12" sm="4">
+                            <v-select
+                              v-model="batchEvaluatorModel"
+                              :items="modelOptions"
+                              label="評価者AIモデル"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                        </v-row>
                       </v-card-text>
                     </v-card>
 
@@ -830,6 +862,10 @@ const deleteInstance = async () => {
 const batchPatientInput = ref('');
 const batchRunsPerPatient = ref(1);
 const batchConcurrency = ref(2);
+const batchNurseModel = ref('gpt-4.1');
+const batchPatientModel = ref('gpt-4.1');
+const batchEvaluatorModel = ref('gpt-4.1');
+const modelOptions = ['gpt-4.1', 'gpt-5-mini', 'gpt-5.2', 'gpt-5-nano'];
 const batchStatus = ref<BatchStatus | null>(null);
 const batchRunning = computed(() =>
   batchStatus.value?.status === 'running' || batchStatus.value?.status === 'stopping'
@@ -868,7 +904,10 @@ const startBatch = async () => {
     return;
   }
   try {
-    const result = await irtApi.startBatch(patientIds, batchRunsPerPatient.value, batchConcurrency.value);
+    const result = await irtApi.startBatch(
+      patientIds, batchRunsPerPatient.value, batchConcurrency.value,
+      batchNurseModel.value, batchPatientModel.value, batchEvaluatorModel.value
+    );
     batchStatus.value = {
       batch_id: result.batch_id,
       status: 'running',
