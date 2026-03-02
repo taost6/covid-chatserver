@@ -11,6 +11,7 @@ import sys
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from modelIRT import Base, IRTItemType, IRTItemTypeService
+from modelPrompt import Base as PromptBase, PromptTemplate, PromptTemplateService
 
 CATALOG_VERSION = 3
 
@@ -324,6 +325,47 @@ V3_ITEM_TYPES = [
 ]
 
 
+IRT_EVALUATOR_DEFAULT_PROMPT = """あなたは積極的疫学調査の評価専門家です。
+以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。
+
+判定基準: 「会話にて言及されたかどうか」を代理指標とする。
+- is_correct=true: 当該情報が会話中に出現した（保健師が質問し、患者が回答した、あるいは患者が自発的に言及した）
+- is_correct=false: 当該情報が会話中に出現しなかった
+- confidence: 判定の確信度(0.0-1.0)
+  - 1.0: 明確に言及されている / 明確に言及されていない
+  - 0.7-0.9: 部分的に言及されている、または間接的に推測できる
+  - 0.5-0.6: 曖昧、解釈が分かれる可能性がある
+- reasoning: 判定の根拠を簡潔に記述（該当する発言の要約、または不在の説明）
+
+注意事項:
+- 各IRT項目のdescriptionに書かれた具体的な情報が会話に出現したかどうかで判定する
+- 部分的に聴取された場合でも、主要な情報が得られていれば is_correct=true とする
+- 保健師が質問したが患者が回答を拒否・回避した場合は is_correct=false とする
+
+必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"""
+
+
+def initialize_irt_evaluator_prompt(db):
+    """IRT判定用プロンプトのデフォルトを投入"""
+    service = PromptTemplateService(db)
+    existing = service.get_active_template('irt_evaluator')
+    if existing:
+        print(f"IRT評価プロンプト (irt_evaluator) は既に存在します（version {existing.version}）。スキップします。")
+        return
+
+    template = PromptTemplate(
+        template_type='irt_evaluator',
+        version=1,
+        prompt_text=IRT_EVALUATOR_DEFAULT_PROMPT,
+        message_text=None,
+        description='IRT正誤判定用デフォルトプロンプト（Step 2）',
+        is_active=True
+    )
+    db.add(template)
+    db.commit()
+    print("IRT評価プロンプト (irt_evaluator) version 1 を投入しました。")
+
+
 def main():
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
@@ -332,6 +374,7 @@ def main():
 
     engine = create_engine(db_url)
     Base.metadata.create_all(bind=engine)
+    PromptBase.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
 
@@ -342,17 +385,19 @@ def main():
         existing = service.get_all_item_types(catalog_version=CATALOG_VERSION)
         if existing:
             print(f"カタログ v{CATALOG_VERSION} は既に {len(existing)} 件存在します。スキップします。")
-            return
+        else:
+            # 一括投入
+            items_with_version = [
+                {**item, "catalog_version": CATALOG_VERSION}
+                for item in V3_ITEM_TYPES
+            ]
+            created = service.bulk_create_item_types(items_with_version)
+            active_count = sum(1 for it in created if it.status == 'active')
+            candidate_count = sum(1 for it in created if it.status == 'candidate')
+            print(f"カタログ v{CATALOG_VERSION}: {len(created)} 件投入完了（active: {active_count}, candidate: {candidate_count}）")
 
-        # 一括投入
-        items_with_version = [
-            {**item, "catalog_version": CATALOG_VERSION}
-            for item in V3_ITEM_TYPES
-        ]
-        created = service.bulk_create_item_types(items_with_version)
-        active_count = sum(1 for it in created if it.status == 'active')
-        candidate_count = sum(1 for it in created if it.status == 'candidate')
-        print(f"カタログ v{CATALOG_VERSION}: {len(created)} 件投入完了（active: {active_count}, candidate: {candidate_count}）")
+        # IRT評価プロンプト投入
+        initialize_irt_evaluator_prompt(db)
 
     finally:
         db.close()

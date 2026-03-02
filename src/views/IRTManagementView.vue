@@ -10,6 +10,7 @@
             <v-tabs v-model="currentTab" grow>
               <v-tab value="item-types">項目タイプ一覧</v-tab>
               <v-tab value="patient-instances">患者インスタンス</v-tab>
+              <v-tab value="judgments">正誤判定</v-tab>
             </v-tabs>
 
             <v-tabs-window v-model="currentTab">
@@ -240,6 +241,243 @@
                   </v-card-text>
                 </v-card>
               </v-tabs-window-item>
+
+              <!-- タブ3: 正誤判定 -->
+              <v-tabs-window-item value="judgments">
+                <v-card flat>
+                  <v-card-text>
+                    <!-- 上段: バッチ実行パネル -->
+                    <v-card class="mb-4" variant="outlined">
+                      <v-card-title class="text-subtitle-1">バッチ実行</v-card-title>
+                      <v-card-text>
+                        <v-row align="center">
+                          <v-col cols="12" sm="4">
+                            <v-text-field
+                              v-model="batchPatientInput"
+                              label="患者ID (例: 1-5 or 1,3,5)"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                          <v-col cols="6" sm="2">
+                            <v-text-field
+                              v-model.number="batchRunsPerPatient"
+                              label="回数/患者"
+                              type="number"
+                              min="1"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                          <v-col cols="6" sm="2">
+                            <v-text-field
+                              v-model.number="batchConcurrency"
+                              label="並列数"
+                              type="number"
+                              min="1"
+                              max="5"
+                              density="compact"
+                              hide-details
+                              :disabled="batchRunning"
+                            />
+                          </v-col>
+                          <v-col cols="auto">
+                            <v-btn
+                              v-if="!batchRunning"
+                              color="primary"
+                              :disabled="!batchPatientInput"
+                              @click="startBatch"
+                            >
+                              バッチ開始
+                            </v-btn>
+                            <v-btn
+                              v-else
+                              color="error"
+                              @click="stopBatch"
+                            >
+                              停止
+                            </v-btn>
+                          </v-col>
+                        </v-row>
+                      </v-card-text>
+                    </v-card>
+
+                    <!-- 中段: 進捗表示 -->
+                    <v-card v-if="batchStatus" class="mb-4" variant="outlined">
+                      <v-card-text>
+                        <div class="d-flex align-center mb-2">
+                          <span class="text-subtitle-2 mr-4">進捗</span>
+                          <v-chip size="small" color="info" variant="tonal" class="mr-2">
+                            実行中: {{ batchStatus.running }}
+                          </v-chip>
+                          <v-chip size="small" color="success" variant="tonal" class="mr-2">
+                            完了: {{ batchStatus.completed }}
+                          </v-chip>
+                          <v-chip size="small" color="error" variant="tonal" class="mr-2">
+                            失敗: {{ batchStatus.failed }}
+                          </v-chip>
+                          <v-chip size="small" variant="outlined">
+                            合計: {{ batchStatus.total }}
+                          </v-chip>
+                          <v-spacer />
+                          <v-chip
+                            size="small"
+                            :color="batchStatus.status === 'completed' ? 'success' : batchStatus.status === 'running' ? 'primary' : 'warning'"
+                          >
+                            {{ batchStatus.status }}
+                          </v-chip>
+                        </div>
+                        <v-progress-linear
+                          :model-value="batchStatus.total > 0 ? (batchStatus.completed + batchStatus.failed) / batchStatus.total * 100 : 0"
+                          :color="batchStatus.failed > 0 ? 'warning' : 'primary'"
+                          height="8"
+                          rounded
+                        />
+                        <div class="text-caption text-right mt-1">
+                          {{ batchStatus.completed + batchStatus.failed }} / {{ batchStatus.total }}
+                        </div>
+
+                        <!-- バッチ結果テーブル -->
+                        <v-data-table
+                          v-if="batchStatus.results.length > 0"
+                          :headers="batchResultHeaders"
+                          :items="batchStatus.results"
+                          density="compact"
+                          class="mt-3"
+                          :items-per-page="10"
+                        >
+                          <template #item.status="{ item }">
+                            <v-chip
+                              size="x-small"
+                              :color="item.status === 'completed' ? 'success' : item.status === 'failed' ? 'error' : 'primary'"
+                            >
+                              {{ item.status }}
+                            </v-chip>
+                          </template>
+                          <template #item.score="{ item }">
+                            <span v-if="item.correct_count != null">
+                              {{ item.correct_count }}/{{ item.total_count }}
+                              ({{ item.total_count > 0 ? Math.round(item.correct_count / item.total_count * 100) : 0 }}%)
+                            </span>
+                            <span v-else class="text-grey">-</span>
+                          </template>
+                          <template #item.error="{ item }">
+                            <span v-if="item.error" class="text-error text-caption">{{ item.error }}</span>
+                          </template>
+                        </v-data-table>
+                      </v-card-text>
+                    </v-card>
+
+                    <!-- 下段: 個別セッション判定結果 -->
+                    <v-card variant="outlined">
+                      <v-card-title class="text-subtitle-1">
+                        <v-row align="center" no-gutters>
+                          <v-col cols="auto" class="mr-4">セッション判定結果</v-col>
+                          <v-col cols="4">
+                            <v-select
+                              v-model="selectedSessionId"
+                              :items="sessionOptions"
+                              item-title="label"
+                              item-value="value"
+                              label="セッション"
+                              density="compact"
+                              hide-details
+                              :loading="loadingSessions"
+                              @update:model-value="loadSessionJudgments"
+                            />
+                          </v-col>
+                          <v-col cols="auto" class="ml-4">
+                            <v-btn
+                              color="primary"
+                              size="small"
+                              :loading="evaluating"
+                              :disabled="!selectedSessionId"
+                              @click="evaluateSession"
+                            >
+                              判定実行
+                            </v-btn>
+                          </v-col>
+                          <v-spacer />
+                          <v-col cols="auto">
+                            <v-chip v-if="judgments.length > 0" color="primary" size="small">
+                              {{ judgments.length }} 件
+                            </v-chip>
+                          </v-col>
+                        </v-row>
+                      </v-card-title>
+                      <v-card-text>
+                        <v-alert
+                          v-if="!selectedSessionId"
+                          type="info"
+                          text="セッションを選択して個別判定結果を確認できます"
+                          density="compact"
+                          class="mb-4"
+                        />
+
+                        <v-alert v-if="evaluating" type="warning" density="compact" class="mb-4">
+                          <v-progress-linear indeterminate color="warning" class="mb-2" />
+                          LLMにより判定中です...
+                        </v-alert>
+
+                        <v-row v-if="judgments.length > 0 && !evaluating" class="mb-4">
+                          <v-col cols="auto">
+                            <v-chip color="success" variant="tonal" size="small">
+                              正答: {{ judgments.filter(j => j.is_correct).length }}
+                            </v-chip>
+                          </v-col>
+                          <v-col cols="auto">
+                            <v-chip color="error" variant="tonal" size="small">
+                              誤答: {{ judgments.filter(j => !j.is_correct).length }}
+                            </v-chip>
+                          </v-col>
+                          <v-col cols="auto">
+                            <v-chip color="info" variant="tonal" size="small">
+                              正答率: {{ Math.round(judgments.filter(j => j.is_correct).length / judgments.length * 100) }}%
+                            </v-chip>
+                          </v-col>
+                        </v-row>
+
+                        <v-data-table
+                          v-if="selectedSessionId"
+                          :headers="judgmentHeaders"
+                          :items="judgments"
+                          :loading="loadingJudgments"
+                          item-value="id"
+                          hover
+                          density="comfortable"
+                        >
+                          <template #item.is_correct="{ item }">
+                            <v-icon
+                              :color="item.is_correct ? 'success' : 'error'"
+                              size="small"
+                            >
+                              {{ item.is_correct ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                            </v-icon>
+                          </template>
+                          <template #item.instance_id="{ item }">
+                            <span>{{ instanceLabel(item.instance_id) }}</span>
+                          </template>
+                          <template #item.confidence="{ item }">
+                            <v-chip
+                              v-if="item.confidence != null"
+                              size="x-small"
+                              :color="item.confidence >= 0.8 ? 'success' : item.confidence >= 0.5 ? 'warning' : 'error'"
+                              variant="tonal"
+                            >
+                              {{ (item.confidence * 100).toFixed(0) }}%
+                            </v-chip>
+                          </template>
+                          <template #item.notes="{ item }">
+                            <span class="text-body-2">{{ item.notes }}</span>
+                          </template>
+                        </v-data-table>
+                      </v-card-text>
+                    </v-card>
+                  </v-card-text>
+                </v-card>
+              </v-tabs-window-item>
             </v-tabs-window>
           </v-card-text>
         </v-card>
@@ -336,9 +574,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { irtApi } from '@/utils/irtApi';
-import type { IRTItemType, IRTPatientInstance } from '@/utils/irtApi';
+import type { IRTItemType, IRTPatientInstance, IRTResponseJudgment, BatchStatus } from '@/utils/irtApi';
 
 // --- タブ ---
 const currentTab = ref('item-types');
@@ -588,9 +826,208 @@ const deleteInstance = async () => {
   }
 };
 
+// --- バッチ実行 ---
+const batchPatientInput = ref('');
+const batchRunsPerPatient = ref(1);
+const batchConcurrency = ref(2);
+const batchStatus = ref<BatchStatus | null>(null);
+const batchRunning = computed(() =>
+  batchStatus.value?.status === 'running' || batchStatus.value?.status === 'stopping'
+);
+let batchPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const batchResultHeaders = [
+  { title: '患者ID', key: 'patient_id', width: '80px' },
+  { title: 'Run', key: 'run_number', width: '60px' },
+  { title: '状態', key: 'status', width: '90px' },
+  { title: 'スコア', key: 'score', width: '120px' },
+  { title: 'セッションID', key: 'session_id', width: '200px' },
+  { title: 'エラー', key: 'error' },
+];
+
+const parsePatientIds = (input: string): string[] => {
+  const ids: string[] = [];
+  for (const part of input.split(',')) {
+    const trimmed = part.trim();
+    if (trimmed.includes('-')) {
+      const [start, end] = trimmed.split('-').map(Number);
+      if (!isNaN(start) && !isNaN(end)) {
+        for (let i = start; i <= end; i++) ids.push(String(i));
+      }
+    } else if (trimmed) {
+      ids.push(trimmed);
+    }
+  }
+  return ids;
+};
+
+const startBatch = async () => {
+  const patientIds = parsePatientIds(batchPatientInput.value);
+  if (patientIds.length === 0) {
+    showSnackbar('患者IDを入力してください', 'error');
+    return;
+  }
+  try {
+    const result = await irtApi.startBatch(patientIds, batchRunsPerPatient.value, batchConcurrency.value);
+    batchStatus.value = {
+      batch_id: result.batch_id,
+      status: 'running',
+      total: result.total_tasks,
+      completed: 0,
+      failed: 0,
+      running: 0,
+      results: [],
+    };
+    showSnackbar(`バッチ開始: ${result.total_tasks} タスク`);
+    startBatchPolling(result.batch_id);
+  } catch (error) {
+    console.error('Failed to start batch:', error);
+    showSnackbar('バッチ開始に失敗しました', 'error');
+  }
+};
+
+const stopBatch = async () => {
+  if (!batchStatus.value) return;
+  try {
+    await irtApi.stopBatch(batchStatus.value.batch_id);
+    showSnackbar('バッチ停止をリクエストしました');
+  } catch (error) {
+    console.error('Failed to stop batch:', error);
+    showSnackbar('バッチ停止に失敗しました', 'error');
+  }
+};
+
+const startBatchPolling = (batchId: string) => {
+  stopBatchPolling();
+  batchPollTimer = setInterval(async () => {
+    try {
+      const status = await irtApi.getBatchStatus(batchId);
+      batchStatus.value = status;
+      if (status.status === 'completed' || status.status === 'stopped') {
+        stopBatchPolling();
+        // バッチ完了後にセッション一覧を更新
+        await loadSessions();
+      }
+    } catch (error) {
+      console.error('Failed to poll batch status:', error);
+    }
+  }, 2000);
+};
+
+const stopBatchPolling = () => {
+  if (batchPollTimer) {
+    clearInterval(batchPollTimer);
+    batchPollTimer = null;
+  }
+};
+
+// --- 正誤判定 ---
+const selectedSessionId = ref<string | null>(null);
+const sessions = ref<Array<{ session_id: string; user_name: string; user_role: string; patient_id: string | null; started_at: string }>>([]);
+const judgments = ref<IRTResponseJudgment[]>([]);
+const loadingSessions = ref(false);
+const loadingJudgments = ref(false);
+const evaluating = ref(false);
+// インスタンスID→ラベルのマップ（判定結果表示用）
+const instanceMap = ref<Record<number, string>>({});
+
+const sessionOptions = computed(() => {
+  return sessions.value
+    .filter(s => s.patient_id)
+    .map(s => ({
+      value: s.session_id,
+      label: `${s.patient_id ? '患者' + s.patient_id : ''} / ${s.user_role} / ${s.user_name} (${new Date(s.started_at).toLocaleDateString('ja-JP')})`,
+    }));
+});
+
+const judgmentHeaders = [
+  { title: 'IRT項目', key: 'instance_id', width: '200px' },
+  { title: '正誤', key: 'is_correct', width: '70px' },
+  { title: '確信度', key: 'confidence', width: '90px' },
+  { title: '根拠', key: 'notes' },
+];
+
+const instanceLabel = (instanceId: number): string => {
+  return instanceMap.value[instanceId] || `#${instanceId}`;
+};
+
+const loadSessions = async () => {
+  loadingSessions.value = true;
+  try {
+    sessions.value = await irtApi.getSessions();
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+  } finally {
+    loadingSessions.value = false;
+  }
+};
+
+const loadSessionJudgments = async () => {
+  if (!selectedSessionId.value) return;
+  loadingJudgments.value = true;
+  try {
+    judgments.value = await irtApi.getSessionJudgments(selectedSessionId.value);
+    // 選択されたセッションの患者IDからインスタンスマップを構築
+    const session = sessions.value.find(s => s.session_id === selectedSessionId.value);
+    if (session?.patient_id) {
+      await buildInstanceMap(session.patient_id);
+    }
+  } catch (error) {
+    console.error('Failed to load judgments:', error);
+    judgments.value = [];
+  } finally {
+    loadingJudgments.value = false;
+  }
+};
+
+const buildInstanceMap = async (patientId: string) => {
+  try {
+    const instances = await irtApi.getPatientInstances(patientId);
+    const map: Record<number, string> = {};
+    for (const inst of instances) {
+      const typeName = itemTypes.value.find(it => it.code === inst.item_type_code)?.name_ja || inst.item_type_code;
+      map[inst.id] = `${inst.item_type_code}-${circledNumber(inst.instance_number)} ${typeName}`;
+    }
+    instanceMap.value = map;
+  } catch (error) {
+    console.error('Failed to build instance map:', error);
+  }
+};
+
+const evaluateSession = async () => {
+  if (!selectedSessionId.value) return;
+  evaluating.value = true;
+  try {
+    const result = await irtApi.evaluateSession(selectedSessionId.value);
+    judgments.value = result.judgments;
+    // インスタンスマップも更新
+    const session = sessions.value.find(s => s.session_id === selectedSessionId.value);
+    if (session?.patient_id) {
+      await buildInstanceMap(session.patient_id);
+    }
+    showSnackbar(`${result.judged_count} 件の判定が完了しました`);
+  } catch (error) {
+    console.error('Failed to evaluate session:', error);
+    showSnackbar('判定に失敗しました', 'error');
+  } finally {
+    evaluating.value = false;
+  }
+};
+
+// 判定タブに切り替えた時にセッション一覧をロード
+watch(currentTab, (tab) => {
+  if (tab === 'judgments' && sessions.value.length === 0) {
+    loadSessions();
+  }
+});
+
 // --- 初期化 ---
 onMounted(() => {
   loadItemTypes();
+});
+
+onUnmounted(() => {
+  stopBatchPolling();
 });
 </script>
 

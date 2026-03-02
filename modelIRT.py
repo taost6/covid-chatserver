@@ -242,3 +242,55 @@ class IRTPatientInstanceService:
                 matrix[inst.patient_id][inst.item_type_code] = []
             matrix[inst.patient_id][inst.item_type_code].append(inst.instance_number)
         return matrix
+
+
+class IRTResponseJudgmentService:
+    """IRT正誤判定結果のCRUD操作"""
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create_judgment(self, session_id: str, instance_id: int,
+                        is_correct: bool, judgment_method: str = 'ai',
+                        confidence: float = None,
+                        evidence_message_ids: list = None,
+                        notes: str = None) -> IRTResponseJudgment:
+        judgment = IRTResponseJudgment(
+            session_id=session_id, instance_id=instance_id,
+            is_correct=is_correct, judgment_method=judgment_method,
+            confidence=confidence,
+            evidence_message_ids=json.dumps(evidence_message_ids) if evidence_message_ids else None,
+            notes=notes
+        )
+        self.db.add(judgment)
+        self.db.commit()
+        self.db.refresh(judgment)
+        return judgment
+
+    def bulk_create_judgments(self, judgments: List[dict]) -> List[IRTResponseJudgment]:
+        objs = []
+        for j in judgments:
+            if 'evidence_message_ids' in j and isinstance(j['evidence_message_ids'], list):
+                j['evidence_message_ids'] = json.dumps(j['evidence_message_ids'])
+            objs.append(IRTResponseJudgment(**j))
+        self.db.add_all(objs)
+        self.db.commit()
+        for o in objs:
+            self.db.refresh(o)
+        return objs
+
+    def get_judgments_for_session(self, session_id: str) -> List[IRTResponseJudgment]:
+        return self.db.query(IRTResponseJudgment).filter(
+            IRTResponseJudgment.session_id == session_id
+        ).order_by(IRTResponseJudgment.instance_id).all()
+
+    def get_judgments_for_instance(self, instance_id: int) -> List[IRTResponseJudgment]:
+        return self.db.query(IRTResponseJudgment).filter(
+            IRTResponseJudgment.instance_id == instance_id
+        ).order_by(IRTResponseJudgment.session_id).all()
+
+    def delete_judgments_for_session(self, session_id: str) -> int:
+        count = self.db.query(IRTResponseJudgment).filter(
+            IRTResponseJudgment.session_id == session_id
+        ).delete()
+        self.db.commit()
+        return count

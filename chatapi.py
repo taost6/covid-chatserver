@@ -22,11 +22,12 @@ from modelRole import PatientRoleProvider
 import modelDatabase
 from modelSession import Session as SessionModel # New
 from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
-from modelIRT import IRTItemType, IRTItemTypeService, IRTPatientInstance, IRTPatientInstanceService
+from modelIRT import IRTItemType, IRTItemTypeService, IRTPatientInstance, IRTPatientInstanceService, IRTResponseJudgment, IRTResponseJudgmentService
 from modelDatabase import db_retry
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
+from irt_batch_runner import IRTBatchRunner
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -284,6 +285,17 @@ class IRTItemTypeBulkRequest(BaseModel):
 
 class IRTPatientInstanceBulkRequest(BaseModel):
     instances: List[dict]
+
+class IRTResponseJudgmentResponse(BaseModel):
+    id: int
+    session_id: str
+    instance_id: int
+    is_correct: bool
+    judgment_method: str
+    confidence: Optional[float]
+    evidence_message_ids: Optional[str]
+    notes: Optional[str]
+    judged_at: datetime
 
 # --- Global State ---
 users_waiting = {}
@@ -831,13 +843,25 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
     #     logger.warning(f"[DEBRIEFING DEBUG] Debriefing failed or contains error")
     
     await user.ws.send_json(DebriefingResponse(session_id=session.session_id, debriefing_data=debriefing_data).dict())
-    
+
     # ログに保存
     await log_message(db, session.session_id, "System", debriefing_assistant_id, "評価者", "System", f"Debriefing Data: {json.dumps(debriefing_data, ensure_ascii=False)}", logger)
-    
+
     # チャットログにシステムメッセージとして評価レポートへのリンクを追加
     debriefing_link_message = f" 評価レポートが完成しました。[レポートを表示](/debriefing/{session.session_id})"
     await log_message(db, session.session_id, user.user_name, debriefing_assistant_id, "評価者", "System", debriefing_link_message, logger)
+
+    # Debriefing完了後にセッションstatusをcompletedに更新
+    try:
+        db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+        if db_session and db_session.status != 'completed':
+            db_session.status = 'completed'
+            db_session.completed_at = datetime.now()
+            db.commit()
+            logger.info(f"Session {session.session_id} marked as completed after debriefing")
+    except Exception as e:
+        logger.error(f"Failed to update session status after debriefing: {e}")
+        db.rollback()
 
 
 async def _execute_debriefing(session: APISession, user: UserDef, db: Session, logger, oaw: OpenAIAssistantWrapper, role_provider):
@@ -851,7 +875,8 @@ def api(config):
     logger = config.logger
     oaw = OpenAIAssistantWrapper(config)
     role_provider = PatientRoleProvider(config)
-    
+    batch_runner = IRTBatchRunner(oaw, role_provider)
+
     app = FastAPI()
 
     @app.on_event("startup")
@@ -1257,7 +1282,6 @@ def api(config):
 
     # --- IRT Item Catalog API ---
     @app.get("/v1/irt/item-types")
-    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     async def get_irt_item_types(
         catalog_version: Optional[int] = None,
         category: Optional[str] = None,
@@ -1279,7 +1303,6 @@ def api(config):
         ]
 
     @app.get("/v1/irt/item-types/{code}")
-    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     async def get_irt_item_type(code: str, catalog_version: Optional[int] = None, db: Session = Depends(get_db)):
         """コードでIRT項目タイプを取得"""
         service = IRTItemTypeService(db)
@@ -1303,7 +1326,6 @@ def api(config):
         return {"created": len(created)}
 
     @app.get("/v1/irt/patient-instances/{patient_id}")
-    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     async def get_irt_patient_instances(
         patient_id: str,
         catalog_version: Optional[int] = None,
@@ -1335,7 +1357,6 @@ def api(config):
         return {"created": len(created)}
 
     @app.get("/v1/irt/scenario-matrix")
-    @db_retry(max_retries=3, delay=1.0, backoff=2.0)
     async def get_irt_scenario_matrix(catalog_version: Optional[int] = None, db: Session = Depends(get_db)):
         """シナリオ×項目マトリクスを取得"""
         service = IRTPatientInstanceService(db)
@@ -1393,6 +1414,303 @@ def api(config):
         if not service.delete_instance(instance_id):
             raise HTTPException(status_code=404, detail="Instance not found")
         return {"deleted": True}
+
+    # --- IRT Judgment API ---
+
+    async def _execute_irt_judgment(session_id: str, db: Session):
+        """セッションの対話ログからIRTインスタンスの正誤を一括判定する"""
+
+        # 1. セッション情報取得
+        session_record = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+        if not session_record:
+            raise HTTPException(status_code=404, detail="Session not found")
+        # statusチェック緩和: completedでなくてもchat_logsがあれば許可（バッチ実行対応）
+        if session_record.status != 'completed':
+            has_logs = db.query(modelDatabase.ChatLog).filter(
+                modelDatabase.ChatLog.session_id == session_id,
+                modelDatabase.ChatLog.sender.in_(["User", "Assistant"]),
+                modelDatabase.ChatLog.is_initial_message == False
+            ).first()
+            if not has_logs:
+                raise HTTPException(status_code=400, detail="Session is not completed yet and has no chat logs")
+
+        patient_id = session_record.patient_id
+        if not patient_id:
+            raise HTTPException(status_code=400, detail="Session has no patient_id")
+
+        # 2. 対話ログ取得（保健師・患者の発言のみ）
+        chat_logs = db.query(modelDatabase.ChatLog).filter(
+            modelDatabase.ChatLog.session_id == session_id,
+            modelDatabase.ChatLog.sender.in_(["User", "Assistant"]),
+            modelDatabase.ChatLog.is_initial_message == False
+        ).order_by(modelDatabase.ChatLog.created_at).all()
+
+        if not chat_logs:
+            raise HTTPException(status_code=400, detail="No chat logs found for this session")
+
+        conversation_history = "\n".join([
+            f"{log.ai_role or log.user_role}: {log.message}"
+            for log in chat_logs
+            if log.message and not log.message.startswith("Debriefing Data:")
+        ])
+
+        # 3. IRTインスタンス取得
+        instance_service = IRTPatientInstanceService(db)
+        instances = instance_service.get_instances_for_patient(patient_id)
+        if not instances:
+            raise HTTPException(status_code=400, detail=f"No IRT instances found for patient {patient_id}")
+
+        # is_detectable=True のインスタンスのみ判定対象
+        detectable_instances = [inst for inst in instances if inst.is_detectable]
+        if not detectable_instances:
+            raise HTTPException(status_code=400, detail="No detectable IRT instances for this patient")
+
+        instances_text = "\n".join([
+            f"- ID:{inst.id} [{inst.item_type_code}] {inst.description or ''}"
+            for inst in detectable_instances
+        ])
+
+        # 4. 判定用プロンプト取得
+        try:
+            prompt_db = modelDatabase.PromptSessionLocal()
+            prompt_service = PromptTemplateService(prompt_db)
+            irt_eval_template = prompt_service.get_active_template('irt_evaluator')
+            prompt_db.close()
+
+            if irt_eval_template:
+                base_prompt = irt_eval_template.prompt_text
+            else:
+                base_prompt = (
+                    "あなたは積極的疫学調査の評価専門家です。\n"
+                    "以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。\n\n"
+                    "判定基準: 「会話にて言及されたかどうか」を代理指標とする。\n"
+                    "- is_correct=true: 当該情報が会話中に出現した（保健師が質問し、患者が回答した）\n"
+                    "- is_correct=false: 当該情報が会話中に出現しなかった\n"
+                    "- confidence: 判定の確信度(0.0-1.0)\n"
+                    "- reasoning: 判定の根拠を簡潔に記述\n\n"
+                    "必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"
+                )
+                logger.warning("IRT evaluator template not found in DB, using fallback prompt")
+        except Exception as e:
+            base_prompt = (
+                "あなたは積極的疫学調査の評価専門家です。\n"
+                "以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。\n\n"
+                "判定基準: 「会話にて言及されたかどうか」を代理指標とする。\n"
+                "- is_correct=true: 当該情報が会話中に出現した\n"
+                "- is_correct=false: 当該情報が会話中に出現しなかった\n"
+                "- confidence: 判定の確信度(0.0-1.0)\n"
+                "- reasoning: 判定の根拠を簡潔に記述\n\n"
+                "必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"
+            )
+            logger.error(f"Failed to load IRT evaluator template: {e}")
+
+        full_prompt = (
+            f"{base_prompt}\n\n"
+            f"【判定対象のIRT項目一覧】\n{instances_text}\n\n"
+            f"【対話履歴】\n{conversation_history}\n\n"
+            f"上記の対話履歴を分析し、各IRT項目について submit_irt_judgments 関数を呼び出して判定結果を提出してください。"
+        )
+
+        # 5. Function Calling ツール定義
+        irt_judgment_tool = {
+            "type": "function",
+            "function": {
+                "name": "submit_irt_judgments",
+                "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "judgments": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
+                                    "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
+                                    "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
+                                    "reasoning": {"type": "string", "description": "判定の根拠"}
+                                },
+                                "required": ["instance_id", "is_correct", "confidence", "reasoning"]
+                            }
+                        }
+                    },
+                    "required": ["judgments"]
+                }
+            }
+        }
+
+        # 6. LLM呼び出し（専用スレッド）
+        try:
+            with open("assistants.json", "r") as f:
+                assistants = json.load(f)
+            if len(assistants) < 3:
+                raise HTTPException(status_code=500, detail="Evaluator assistant ID not found in assistants.json")
+            evaluator_assistant_id = assistants[2]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load assistant config: {e}")
+
+        judgment_thread_id = None
+        try:
+            judgment_thread_id = await oaw.create_thread()
+            logger.info(f"Created IRT judgment thread: {judgment_thread_id}")
+
+            judgment_assistant = AssistantDef(
+                user_id=ai_get_id(),
+                role="評価者",
+                assistant_id=evaluator_assistant_id,
+                thread_id=judgment_thread_id
+            )
+
+            # プロンプトを分割送信
+            prompt_chunks = role_provider._split_text_for_prompt(full_prompt, 2000)
+            logger.info(f"Split IRT judgment prompt into {len(prompt_chunks)} chunks")
+
+            for i, chunk in enumerate(prompt_chunks):
+                await oaw.add_message_to_thread(judgment_assistant.thread_id, chunk)
+                logger.info(f"Sent IRT judgment prompt chunk {i+1}/{len(prompt_chunks)}")
+
+            final_instruction = "上記の情報を分析し、submit_irt_judgments 関数を呼び出して全IRT項目の判定結果を提出してください。"
+            response_text, tool_call = await oaw.send_message(
+                judgment_assistant,
+                final_instruction,
+                tools=[irt_judgment_tool],
+                tool_choice={"type": "function", "function": {"name": "submit_irt_judgments"}},
+                max_retries=5
+            )
+
+            if not tool_call or tool_call.function.name != "submit_irt_judgments":
+                raise HTTPException(status_code=500, detail="LLM did not return expected tool call")
+
+            result = json.loads(tool_call.function.arguments)
+            llm_judgments = result.get("judgments", [])
+            logger.info(f"LLM returned {len(llm_judgments)} judgments for session {session_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"IRT judgment LLM call failed: {e}")
+            raise HTTPException(status_code=500, detail=f"LLM judgment failed: {e}")
+        finally:
+            if judgment_thread_id:
+                try:
+                    await oaw.delete_thread_by_id(judgment_thread_id)
+                    logger.info(f"Deleted IRT judgment thread: {judgment_thread_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete IRT judgment thread: {e}")
+
+        # 7. 既存の判定を削除して再判定
+        judgment_service = IRTResponseJudgmentService(db)
+        deleted = judgment_service.delete_judgments_for_session(session_id)
+        if deleted > 0:
+            logger.info(f"Deleted {deleted} existing judgments for session {session_id}")
+
+        # 8. 判定結果をDBに保存
+        valid_instance_ids = {inst.id for inst in detectable_instances}
+        db_judgments = []
+        for j in llm_judgments:
+            if j.get("instance_id") not in valid_instance_ids:
+                logger.warning(f"Skipping unknown instance_id: {j.get('instance_id')}")
+                continue
+            db_judgments.append({
+                "session_id": session_id,
+                "instance_id": j["instance_id"],
+                "is_correct": j["is_correct"],
+                "judgment_method": "ai",
+                "confidence": j.get("confidence"),
+                "notes": j.get("reasoning"),
+            })
+
+        saved = judgment_service.bulk_create_judgments(db_judgments)
+        logger.info(f"Saved {len(saved)} IRT judgments for session {session_id}")
+
+        return saved
+
+    @app.post("/v1/irt/judgments/evaluate/{session_id}")
+    async def evaluate_irt_judgments(session_id: str, db: Session = Depends(get_db)):
+        """セッションの対話ログからIRT正誤判定を実行"""
+        results = await _execute_irt_judgment(session_id, db)
+        return {
+            "session_id": session_id,
+            "judged_count": len(results),
+            "judgments": [
+                IRTResponseJudgmentResponse(
+                    id=j.id, session_id=j.session_id, instance_id=j.instance_id,
+                    is_correct=j.is_correct, judgment_method=j.judgment_method,
+                    confidence=j.confidence, evidence_message_ids=j.evidence_message_ids,
+                    notes=j.notes, judged_at=j.judged_at
+                ) for j in results
+            ]
+        }
+
+    @app.get("/v1/irt/judgments/session/{session_id}")
+    async def get_irt_judgments_for_session(session_id: str, db: Session = Depends(get_db)):
+        """セッションのIRT判定結果を取得"""
+        service = IRTResponseJudgmentService(db)
+        judgments = service.get_judgments_for_session(session_id)
+        return [
+            IRTResponseJudgmentResponse(
+                id=j.id, session_id=j.session_id, instance_id=j.instance_id,
+                is_correct=j.is_correct, judgment_method=j.judgment_method,
+                confidence=j.confidence, evidence_message_ids=j.evidence_message_ids,
+                notes=j.notes, judged_at=j.judged_at
+            ) for j in judgments
+        ]
+
+    @app.get("/v1/irt/judgments/instance/{instance_id}")
+    async def get_irt_judgments_for_instance(instance_id: int, db: Session = Depends(get_db)):
+        """インスタンスの全セッション判定結果を取得"""
+        service = IRTResponseJudgmentService(db)
+        judgments = service.get_judgments_for_instance(instance_id)
+        return [
+            IRTResponseJudgmentResponse(
+                id=j.id, session_id=j.session_id, instance_id=j.instance_id,
+                is_correct=j.is_correct, judgment_method=j.judgment_method,
+                confidence=j.confidence, evidence_message_ids=j.evidence_message_ids,
+                notes=j.notes, judged_at=j.judged_at
+            ) for j in judgments
+        ]
+
+    # --- IRT Batch API ---
+
+    class BatchStartRequest(BaseModel):
+        patient_ids: List[str]
+        runs_per_patient: int = 1
+        concurrency: int = 2
+
+    @app.post("/v1/irt/batch/start")
+    async def start_irt_batch(req: BatchStartRequest):
+        """ヘッドレスバッチ実行を開始"""
+        if not req.patient_ids:
+            raise HTTPException(status_code=400, detail="patient_ids is required")
+        if req.runs_per_patient < 1:
+            raise HTTPException(status_code=400, detail="runs_per_patient must be >= 1")
+        if req.concurrency < 1:
+            raise HTTPException(status_code=400, detail="concurrency must be >= 1")
+
+        batch_id = await batch_runner.start_batch(
+            req.patient_ids, req.runs_per_patient, req.concurrency
+        )
+        total = len(req.patient_ids) * req.runs_per_patient
+        logger.info(f"IRT batch started: batch_id={batch_id} total={total}")
+        return {"batch_id": batch_id, "total_tasks": total}
+
+    @app.get("/v1/irt/batch/status/{batch_id}")
+    async def get_irt_batch_status(batch_id: str):
+        """バッチ実行状態を取得"""
+        status = batch_runner.get_status(batch_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        return status
+
+    @app.post("/v1/irt/batch/stop/{batch_id}")
+    async def stop_irt_batch(batch_id: str):
+        """バッチ実行を停止"""
+        stopped = batch_runner.stop_batch(batch_id)
+        if not stopped:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        return {"stopped": True}
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):

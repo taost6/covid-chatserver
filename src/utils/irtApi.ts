@@ -34,6 +34,49 @@ export interface IRTPatientInstance {
   created_at: string;
 }
 
+export interface IRTResponseJudgment {
+  id: number;
+  session_id: string;
+  instance_id: number;
+  is_correct: boolean;
+  judgment_method: string;
+  confidence: number | null;
+  evidence_message_ids: string | null;
+  notes: string | null;
+  judged_at: string;
+}
+
+export interface IRTJudgmentEvaluateResult {
+  session_id: string;
+  judged_count: number;
+  judgments: IRTResponseJudgment[];
+}
+
+export interface BatchStartResponse {
+  batch_id: string;
+  total_tasks: number;
+}
+
+export interface BatchResultEntry {
+  session_id: string;
+  patient_id: string;
+  run_number: number;
+  status: string;
+  correct_count: number | null;
+  total_count: number | null;
+  error: string | null;
+}
+
+export interface BatchStatus {
+  batch_id: string;
+  status: string;
+  total: number;
+  completed: number;
+  failed: number;
+  running: number;
+  results: BatchResultEntry[];
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -136,5 +179,57 @@ export const irtApi = {
   async getScenarioMatrix(catalogVersion?: number): Promise<Record<string, Record<string, number[]>>> {
     const query = catalogVersion ? `?catalog_version=${catalogVersion}` : '';
     return await request<Record<string, Record<string, number[]>>>(`${baseUrl()}/v1/irt/scenario-matrix${query}`);
+  },
+
+  // 正誤判定
+  async evaluateSession(sessionId: string): Promise<IRTJudgmentEvaluateResult> {
+    return await request<IRTJudgmentEvaluateResult>(`${baseUrl()}/v1/irt/judgments/evaluate/${sessionId}`, {
+      method: 'POST',
+    });
+  },
+
+  async getSessionJudgments(sessionId: string): Promise<IRTResponseJudgment[]> {
+    return await request<IRTResponseJudgment[]>(`${baseUrl()}/v1/irt/judgments/session/${sessionId}`);
+  },
+
+  async getInstanceJudgments(instanceId: number): Promise<IRTResponseJudgment[]> {
+    return await request<IRTResponseJudgment[]>(`${baseUrl()}/v1/irt/judgments/instance/${instanceId}`);
+  },
+
+  // セッション一覧（判定対象選択用）
+  async getSessions(): Promise<Array<{
+    session_id: string;
+    user_name: string;
+    user_role: string;
+    patient_id: string | null;
+    started_at: string;
+  }>> {
+    return await request(`${baseUrl()}/v1/logs`);
+  },
+
+  // バッチ実行
+  async startBatch(
+    patientIds: string[],
+    runsPerPatient: number,
+    concurrency: number,
+  ): Promise<BatchStartResponse> {
+    return await request<BatchStartResponse>(`${baseUrl()}/v1/irt/batch/start`, {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_ids: patientIds,
+        runs_per_patient: runsPerPatient,
+        concurrency,
+      }),
+    });
+  },
+
+  async getBatchStatus(batchId: string): Promise<BatchStatus> {
+    return await request<BatchStatus>(`${baseUrl()}/v1/irt/batch/status/${batchId}`);
+  },
+
+  async stopBatch(batchId: string): Promise<{ stopped: boolean }> {
+    return await request<{ stopped: boolean }>(`${baseUrl()}/v1/irt/batch/stop/${batchId}`, {
+      method: 'POST',
+    });
   },
 };
