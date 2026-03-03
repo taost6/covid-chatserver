@@ -26,7 +26,7 @@ JST = timezone(timedelta(hours=9))
 class HeadlessConversation:
     """WebSocket不要のAI対話実行"""
 
-    MAX_TURNS = 30
+    MAX_TURNS = 100
 
     def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, db,
                  nurse_model: Optional[str] = None, patient_model: Optional[str] = None):
@@ -108,10 +108,13 @@ class HeadlessConversation:
 
             # 4. 対話ループ
             # 保健師AI用の会話終了ツール定義
+            # フロー: 保健師が感謝の言葉+ツール呼び出しで終了を宣言
+            #       → 感謝テキストを患者AIに送信 → 患者が応答 → 終了
             end_conversation_tool = {
                 "type": "function",
                 "name": "end_conversation_and_start_debriefing",
-                "description": "聞き取り調査が完了したと判断した場合に呼び出す。会話を終了し評価を開始する。",
+                "description": "聞き取り調査が十分に完了したと判断した場合に呼び出す。"
+                               "感謝の言葉と一緒に呼び出すこと。",
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -148,8 +151,37 @@ class HeadlessConversation:
                 )
 
                 if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
+                    # 保健師AIが終了を判断した
+                    # 付随テキスト（感謝の言葉）があれば患者に送って応答を得る
+                    if response_msg and not response_msg.startswith("FAILED:"):
+                        cleaned = response_msg.strip()
+                        if len(cleaned) >= 3:
+                            history.append({"role": nurse_ai.role, "text": cleaned})
+                            await log_message(
+                                self.db, session_id, "AI", nurse_ai.assistant_id,
+                                "傍聴者", "Assistant", cleaned, logger,
+                                ai_role="保健師"
+                            )
+                            turn_count += 1
+
+                            # 患者AIに最後の応答機会を与える
+                            patient_response, _ = await self.oaw.send_message(
+                                patient_ai, cleaned, tools=[],
+                                max_retries=5, model=self.patient_model
+                            )
+                            if patient_response and not patient_response.startswith("FAILED:"):
+                                patient_cleaned = patient_response.strip()
+                                if len(patient_cleaned) >= 3:
+                                    history.append({"role": patient_ai.role, "text": patient_cleaned})
+                                    await log_message(
+                                        self.db, session_id, "AI", patient_ai.assistant_id,
+                                        "傍聴者", "Assistant", patient_cleaned, logger,
+                                        ai_role="患者"
+                                    )
+                                    turn_count += 1
+
                     ended_by = "tool_call"
-                    logger.info(f"[Batch] Session {session_id}: conversation ended by tool_call at turn {turn_count}")
+                    logger.info(f"[Batch] Session {session_id}: conversation ended by nurse tool_call at turn {turn_count}")
                     break
 
                 if response_msg and not response_msg.startswith("FAILED:"):

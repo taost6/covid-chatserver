@@ -398,12 +398,19 @@ class OpenAIAssistantWrapper():
                         )
 
                     # レスポンス解析: function_call を探す
+                    tool_call_item = None
                     for item in response.output:
                         if item.type == "function_call":
                             # 未解決の function_call として記録
                             # （次回の send_message 時に function_call_output で解決する）
                             conv.unresolved_call_id = item.call_id
-                            return None, item
+                            tool_call_item = item
+                            break
+
+                    if tool_call_item:
+                        # テキストも同時に返す（function_callと共にテキストが含まれる場合）
+                        text = response.output_text if response.output_text else None
+                        return text, tool_call_item
 
                     # テキストレスポンスの場合は unresolved をクリア
                     conv.unresolved_call_id = None
