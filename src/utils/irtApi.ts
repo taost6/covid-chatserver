@@ -77,6 +77,49 @@ export interface BatchStatus {
   results: BatchResultEntry[];
 }
 
+export interface PatientItemJudgmentDetail {
+  session_id: string;
+  is_correct: boolean;
+  confidence: number | null;
+  notes: string | null;
+}
+
+export interface PatientItemStat {
+  instance_id: number;
+  item_type_code: string;
+  instance_number: number;
+  description: string | null;
+  is_detectable: boolean;
+  total_judgments: number;
+  correct_count: number;
+  accuracy: number;
+  sessions: PatientItemJudgmentDetail[];
+}
+
+export interface PatientSessionStat {
+  session_id: string;
+  created_at: string | null;
+  nurse_model: string | null;
+  patient_model: string | null;
+  correct_count: number;
+  total_count: number;
+  accuracy: number;
+}
+
+export interface PatientCategoryStat {
+  category: string;
+  total_instances: number;
+  avg_accuracy: number;
+}
+
+export interface PatientStatsResponse {
+  patient_id: string;
+  total_sessions: number;
+  sessions: PatientSessionStat[];
+  item_stats: PatientItemStat[];
+  category_stats: PatientCategoryStat[];
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -194,6 +237,10 @@ export const irtApi = {
 
   async getInstanceJudgments(instanceId: number): Promise<IRTResponseJudgment[]> {
     return await request<IRTResponseJudgment[]>(`${baseUrl()}/v1/irt/judgments/instance/${instanceId}`);
+  },
+
+  async getPatientStats(patientId: string): Promise<PatientStatsResponse> {
+    return await request<PatientStatsResponse>(`${baseUrl()}/v1/irt/judgments/patient/${patientId}`);
   },
 
   // セッション一覧（判定対象選択用）

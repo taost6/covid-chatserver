@@ -288,6 +288,14 @@ class IRTResponseJudgmentService:
             IRTResponseJudgment.instance_id == instance_id
         ).order_by(IRTResponseJudgment.session_id).all()
 
+    def get_judgments_by_instance_ids(self, instance_ids: List[int]) -> List[IRTResponseJudgment]:
+        """複数インスタンスIDの全判定結果を一括取得"""
+        if not instance_ids:
+            return []
+        return self.db.query(IRTResponseJudgment).filter(
+            IRTResponseJudgment.instance_id.in_(instance_ids)
+        ).order_by(IRTResponseJudgment.instance_id, IRTResponseJudgment.session_id).all()
+
     def delete_judgments_for_session(self, session_id: str) -> int:
         count = self.db.query(IRTResponseJudgment).filter(
             IRTResponseJudgment.session_id == session_id

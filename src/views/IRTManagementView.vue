@@ -11,6 +11,7 @@
               <v-tab value="item-types">項目タイプ一覧</v-tab>
               <v-tab value="patient-instances">患者インスタンス</v-tab>
               <v-tab value="judgments">正誤判定</v-tab>
+              <v-tab value="patient-stats">患者別統計</v-tab>
             </v-tabs>
 
             <v-tabs-window v-model="currentTab">
@@ -510,6 +511,160 @@
                   </v-card-text>
                 </v-card>
               </v-tabs-window-item>
+
+              <!-- 患者別統計タブ -->
+              <v-tabs-window-item value="patient-stats">
+                <v-card flat>
+                  <v-card-text>
+                    <!-- 患者ID選択 -->
+                    <v-row align="center" class="mb-4">
+                      <v-col cols="3">
+                        <v-select
+                          v-model="statsPatientId"
+                          :items="patientIdOptions"
+                          label="患者ID"
+                          density="compact"
+                          hide-details
+                        />
+                      </v-col>
+                      <v-col cols="auto">
+                        <v-btn
+                          color="primary"
+                          :loading="loadingStats"
+                          :disabled="!statsPatientId"
+                          @click="loadPatientStats"
+                        >
+                          統計表示
+                        </v-btn>
+                      </v-col>
+                    </v-row>
+
+                    <!-- サマリ -->
+                    <template v-if="patientStats">
+                      <v-row class="mb-4" align="center">
+                        <v-col cols="auto">
+                          <v-chip color="info" variant="tonal">
+                            セッション数: {{ patientStats.total_sessions }}
+                          </v-chip>
+                        </v-col>
+                        <v-col cols="auto" v-for="cat in patientStats.category_stats" :key="cat.category">
+                          <v-chip
+                            :color="cat.avg_accuracy >= 0.7 ? 'success' : cat.avg_accuracy >= 0.4 ? 'warning' : 'error'"
+                            variant="tonal"
+                          >
+                            {{ cat.category }}: {{ (cat.avg_accuracy * 100).toFixed(0) }}%
+                            <span class="text-caption ml-1">({{ cat.total_instances }}項目)</span>
+                          </v-chip>
+                        </v-col>
+                      </v-row>
+
+                      <!-- 項目別正答率テーブル -->
+                      <v-card variant="outlined" class="mb-4">
+                        <v-card-title class="text-subtitle-1">項目別正答率</v-card-title>
+                        <v-data-table
+                          :headers="patientItemHeaders"
+                          :items="patientStats.item_stats.filter(i => i.is_detectable)"
+                          item-value="instance_id"
+                          hover
+                          density="comfortable"
+                          show-expand
+                        >
+                          <template #item.item_type_code="{ item }">
+                            <v-chip size="small" variant="tonal" :color="item.is_detectable ? 'primary' : 'grey'">
+                              {{ item.item_type_code }}-{{ item.instance_number }}
+                            </v-chip>
+                          </template>
+                          <template #item.accuracy="{ item }">
+                            <div class="d-flex align-center" style="min-width:120px">
+                              <v-progress-linear
+                                :model-value="item.accuracy * 100"
+                                :color="item.accuracy >= 0.7 ? 'success' : item.accuracy >= 0.4 ? 'warning' : 'error'"
+                                height="18"
+                                rounded
+                                class="mr-2"
+                                style="flex:1"
+                              >
+                                <template #default>
+                                  <span class="text-caption">{{ (item.accuracy * 100).toFixed(0) }}%</span>
+                                </template>
+                              </v-progress-linear>
+                            </div>
+                          </template>
+                          <template #expanded-row="{ columns, item }">
+                            <tr>
+                              <td :colspan="columns.length" class="pa-2">
+                                <v-table density="compact" class="ml-8">
+                                  <thead>
+                                    <tr>
+                                      <th>セッションID</th>
+                                      <th>結果</th>
+                                      <th>確信度</th>
+                                      <th>メモ</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    <tr v-for="(sj, idx) in item.sessions" :key="idx">
+                                      <td class="text-caption">{{ sj.session_id.substring(0, 12) }}...</td>
+                                      <td>
+                                        <v-icon :color="sj.is_correct ? 'success' : 'error'" size="small">
+                                          {{ sj.is_correct ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                                        </v-icon>
+                                      </td>
+                                      <td>{{ sj.confidence != null ? (sj.confidence * 100).toFixed(0) + '%' : '-' }}</td>
+                                      <td class="text-caption">{{ sj.notes || '-' }}</td>
+                                    </tr>
+                                  </tbody>
+                                </v-table>
+                              </td>
+                            </tr>
+                          </template>
+                        </v-data-table>
+                      </v-card>
+
+                      <!-- セッション比較テーブル -->
+                      <v-card variant="outlined">
+                        <v-card-title class="text-subtitle-1">セッション比較</v-card-title>
+                        <v-data-table
+                          :headers="sessionCompareHeaders"
+                          :items="patientStats.sessions"
+                          density="compact"
+                          hover
+                        >
+                          <template #item.created_at="{ item }">
+                            {{ item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '-' }}
+                          </template>
+                          <template #item.accuracy="{ item }">
+                            <div class="d-flex align-center" style="min-width:140px">
+                              <span class="mr-2">{{ item.correct_count }}/{{ item.total_count }}</span>
+                              <v-progress-linear
+                                :model-value="item.accuracy * 100"
+                                :color="item.accuracy >= 0.7 ? 'success' : item.accuracy >= 0.4 ? 'warning' : 'error'"
+                                height="16"
+                                rounded
+                                style="flex:1"
+                              >
+                                <template #default>
+                                  <span class="text-caption">{{ (item.accuracy * 100).toFixed(0) }}%</span>
+                                </template>
+                              </v-progress-linear>
+                            </div>
+                          </template>
+                        </v-data-table>
+                      </v-card>
+                    </template>
+
+                    <!-- データなし -->
+                    <v-alert
+                      v-else-if="statsPatientId && !loadingStats && statsLoadedOnce"
+                      type="info"
+                      variant="tonal"
+                      class="mt-4"
+                    >
+                      この患者の判定データはありません。
+                    </v-alert>
+                  </v-card-text>
+                </v-card>
+              </v-tabs-window-item>
             </v-tabs-window>
           </v-card-text>
         </v-card>
@@ -608,7 +763,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { irtApi } from '@/utils/irtApi';
-import type { IRTItemType, IRTPatientInstance, IRTResponseJudgment, BatchStatus } from '@/utils/irtApi';
+import type { IRTItemType, IRTPatientInstance, IRTResponseJudgment, BatchStatus, PatientStatsResponse } from '@/utils/irtApi';
 
 // --- タブ ---
 const currentTab = ref('item-types');
@@ -1059,6 +1214,49 @@ watch(currentTab, (tab) => {
     loadSessions();
   }
 });
+
+// --- 患者別統計 ---
+const statsPatientId = ref<string | null>(null);
+const patientStats = ref<PatientStatsResponse | null>(null);
+const loadingStats = ref(false);
+const statsLoadedOnce = ref(false);
+
+const patientItemHeaders = [
+  { title: '項目', key: 'item_type_code', width: '110px' },
+  { title: '説明', key: 'description' },
+  { title: '判定数', key: 'total_judgments', width: '80px' },
+  { title: '正答数', key: 'correct_count', width: '80px' },
+  { title: '正答率', key: 'accuracy', width: '140px' },
+  { title: '', key: 'data-table-expand' },
+];
+
+const sessionCompareHeaders = [
+  { title: 'セッションID', key: 'session_id', width: '200px' },
+  { title: '日時', key: 'created_at', width: '180px' },
+  { title: '保健師モデル', key: 'nurse_model', width: '130px' },
+  { title: '患者モデル', key: 'patient_model', width: '130px' },
+  { title: '正答率', key: 'accuracy', width: '180px' },
+];
+
+const loadPatientStats = async () => {
+  if (!statsPatientId.value) return;
+  loadingStats.value = true;
+  statsLoadedOnce.value = false;
+  try {
+    patientStats.value = await irtApi.getPatientStats(statsPatientId.value);
+    statsLoadedOnce.value = true;
+    if (patientStats.value.total_sessions === 0) {
+      patientStats.value = null;
+    }
+  } catch (error) {
+    console.error('Failed to load patient stats:', error);
+    showSnackbar('患者統計の読み込みに失敗しました', 'error');
+    patientStats.value = null;
+    statsLoadedOnce.value = true;
+  } finally {
+    loadingStats.value = false;
+  }
+};
 
 // --- 初期化 ---
 onMounted(() => {

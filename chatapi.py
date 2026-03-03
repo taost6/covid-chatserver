@@ -295,6 +295,44 @@ class IRTResponseJudgmentResponse(BaseModel):
     notes: Optional[str]
     judged_at: datetime
 
+class PatientItemJudgmentDetail(BaseModel):
+    session_id: str
+    is_correct: bool
+    confidence: Optional[float]
+    notes: Optional[str]
+
+class PatientItemStat(BaseModel):
+    instance_id: int
+    item_type_code: str
+    instance_number: int
+    description: Optional[str]
+    is_detectable: bool
+    total_judgments: int
+    correct_count: int
+    accuracy: float
+    sessions: List[PatientItemJudgmentDetail]
+
+class PatientSessionStat(BaseModel):
+    session_id: str
+    created_at: Optional[datetime]
+    nurse_model: Optional[str]
+    patient_model: Optional[str]
+    correct_count: int
+    total_count: int
+    accuracy: float
+
+class PatientCategoryStat(BaseModel):
+    category: str
+    total_instances: int
+    avg_accuracy: float
+
+class PatientStatsResponse(BaseModel):
+    patient_id: str
+    total_sessions: int
+    sessions: List[PatientSessionStat]
+    item_stats: List[PatientItemStat]
+    category_stats: List[PatientCategoryStat]
+
 # --- Global State ---
 users_waiting = {}
 users_session = {}
@@ -1665,6 +1703,110 @@ def api(config):
                 notes=j.notes, judged_at=j.judged_at
             ) for j in judgments
         ]
+
+    @app.get("/v1/irt/judgments/patient/{patient_id}")
+    async def get_irt_patient_stats(patient_id: str, db: Session = Depends(get_db)):
+        """患者ID別のIRT判定統計を取得"""
+        from collections import defaultdict
+
+        inst_service = IRTPatientInstanceService(db)
+        instances = inst_service.get_instances_for_patient(patient_id)
+        if not instances:
+            return PatientStatsResponse(
+                patient_id=patient_id, total_sessions=0,
+                sessions=[], item_stats=[], category_stats=[]
+            )
+
+        instance_ids = [inst.id for inst in instances]
+
+        judg_service = IRTResponseJudgmentService(db)
+        all_judgments = judg_service.get_judgments_by_instance_ids(instance_ids)
+
+        # グルーピング
+        judgments_by_instance = defaultdict(list)
+        judgments_by_session = defaultdict(list)
+        session_ids = set()
+        for j in all_judgments:
+            judgments_by_instance[j.instance_id].append(j)
+            judgments_by_session[j.session_id].append(j)
+            session_ids.add(j.session_id)
+
+        # セッションメタデータ取得
+        session_map = {}
+        if session_ids:
+            session_records = db.query(SessionModel).filter(
+                SessionModel.session_id.in_(list(session_ids))
+            ).all()
+            session_map = {s.session_id: s for s in session_records}
+
+        # セッション別統計
+        sessions_list = []
+        for sid in sorted(session_ids):
+            sj = judgments_by_session[sid]
+            sr = session_map.get(sid)
+            correct = sum(1 for j in sj if j.is_correct)
+            total = len(sj)
+            sessions_list.append(PatientSessionStat(
+                session_id=sid,
+                created_at=sr.created_at if sr else None,
+                nurse_model=sr.interviewer_model if sr else None,
+                patient_model=sr.patient_model if sr else None,
+                correct_count=correct,
+                total_count=total,
+                accuracy=correct / total if total > 0 else 0.0
+            ))
+
+        # 項目別統計
+        item_stats = []
+        category_totals = defaultdict(lambda: {"instances": 0, "acc_sum": 0.0, "count": 0})
+        for inst in instances:
+            ij = judgments_by_instance.get(inst.id, [])
+            correct = sum(1 for j in ij if j.is_correct)
+            total = len(ij)
+            accuracy = correct / total if total > 0 else 0.0
+
+            item_stats.append(PatientItemStat(
+                instance_id=inst.id,
+                item_type_code=inst.item_type_code,
+                instance_number=inst.instance_number,
+                description=inst.description,
+                is_detectable=inst.is_detectable,
+                total_judgments=total,
+                correct_count=correct,
+                accuracy=accuracy,
+                sessions=[
+                    PatientItemJudgmentDetail(
+                        session_id=j.session_id,
+                        is_correct=j.is_correct,
+                        confidence=j.confidence,
+                        notes=j.notes
+                    ) for j in ij
+                ]
+            ))
+
+            cat = inst.item_type_code.split("-")[0]
+            category_totals[cat]["instances"] += 1
+            if total > 0:
+                category_totals[cat]["acc_sum"] += accuracy
+                category_totals[cat]["count"] += 1
+
+        # カテゴリ別統計
+        category_stats = [
+            PatientCategoryStat(
+                category=cat,
+                total_instances=data["instances"],
+                avg_accuracy=data["acc_sum"] / data["count"] if data["count"] > 0 else 0.0
+            )
+            for cat, data in sorted(category_totals.items())
+        ]
+
+        return PatientStatsResponse(
+            patient_id=patient_id,
+            total_sessions=len(session_ids),
+            sessions=sessions_list,
+            item_stats=item_stats,
+            category_stats=category_stats
+        )
 
     # --- IRT Batch API ---
 
