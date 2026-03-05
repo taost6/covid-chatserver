@@ -9,7 +9,7 @@
           <v-card-text>
             <v-tabs v-model="currentTab" grow>
               <v-tab value="item-types">項目タイプ一覧</v-tab>
-              <v-tab value="patient-instances">患者インスタンス</v-tab>
+              <v-tab value="patient-instances">患者別項目一覧</v-tab>
               <v-tab value="judgments">正誤判定</v-tab>
               <v-tab value="patient-stats">患者別統計</v-tab>
             </v-tabs>
@@ -75,17 +75,17 @@
                 </v-card>
               </v-tabs-window-item>
 
-              <!-- タブ2: 患者インスタンス -->
+              <!-- タブ2: 患者別項目一覧 -->
               <v-tabs-window-item value="patient-instances">
                 <v-card flat>
                   <v-card-text>
                     <v-row>
-                      <!-- 患者選択 + インスタンス一覧 -->
+                      <!-- 患者選択 + 項目一覧 -->
                       <v-col cols="12" md="8">
                         <v-card>
                           <v-card-title>
                             <v-row align="center" no-gutters>
-                              <v-col cols="auto" class="mr-4">インスタンス一覧</v-col>
+                              <v-col cols="auto" class="mr-4">患者別項目一覧</v-col>
                               <v-col cols="4">
                                 <v-select
                                   v-model="selectedPatientId"
@@ -157,10 +157,10 @@
                         </v-card>
                       </v-col>
 
-                      <!-- 新規インスタンス追加フォーム -->
+                      <!-- 新規項目追加フォーム -->
                       <v-col cols="12" md="4">
                         <v-card>
-                          <v-card-title>インスタンス追加</v-card-title>
+                          <v-card-title>項目追加</v-card-title>
                           <v-card-text>
                             <v-alert
                               v-if="!selectedPatientId"
@@ -183,7 +183,7 @@
                               />
                               <v-text-field
                                 v-model.number="instanceForm.instance_number"
-                                label="インスタンス番号"
+                                label="項目番号"
                                 type="number"
                                 min="1"
                                 density="compact"
@@ -302,36 +302,75 @@
                             </v-btn>
                           </v-col>
                         </v-row>
-                        <v-row class="mt-1">
+                        <v-row class="mt-2" dense>
                           <v-col cols="12" sm="4">
-                            <v-select
-                              v-model="batchNurseModel"
-                              :items="modelOptions"
-                              label="保健師AIモデル"
-                              density="compact"
-                              hide-details
-                              :disabled="batchRunning"
-                            />
+                            <fieldset class="batch-fieldset">
+                              <legend>患者AI</legend>
+                              <v-select
+                                v-model="batchPatientModel"
+                                :items="modelOptions"
+                                label="モデル"
+                                density="compact"
+                                hide-details
+                                :disabled="batchRunning"
+                                class="mb-2"
+                              />
+                              <v-select
+                                v-model="batchPatientPromptVersion"
+                                :items="patientPromptOptions"
+                                label="プロンプト"
+                                density="compact"
+                                hide-details
+                                clearable
+                                :disabled="batchRunning"
+                              />
+                            </fieldset>
                           </v-col>
                           <v-col cols="12" sm="4">
-                            <v-select
-                              v-model="batchPatientModel"
-                              :items="modelOptions"
-                              label="患者AIモデル"
-                              density="compact"
-                              hide-details
-                              :disabled="batchRunning"
-                            />
+                            <fieldset class="batch-fieldset">
+                              <legend>保健師AI</legend>
+                              <v-select
+                                v-model="batchNurseModel"
+                                :items="modelOptions"
+                                label="モデル"
+                                density="compact"
+                                hide-details
+                                :disabled="batchRunning"
+                                class="mb-2"
+                              />
+                              <v-select
+                                v-model="batchInterviewerPromptVersion"
+                                :items="interviewerPromptOptions"
+                                label="プロンプト"
+                                density="compact"
+                                hide-details
+                                clearable
+                                :disabled="batchRunning"
+                              />
+                            </fieldset>
                           </v-col>
                           <v-col cols="12" sm="4">
-                            <v-select
-                              v-model="batchEvaluatorModel"
-                              :items="modelOptions"
-                              label="評価者AIモデル"
-                              density="compact"
-                              hide-details
-                              :disabled="batchRunning"
-                            />
+                            <fieldset class="batch-fieldset">
+                              <legend>評価者AI</legend>
+                              <v-select
+                                v-model="batchEvaluatorModel"
+                                :items="modelOptions"
+                                label="モデル"
+                                density="compact"
+                                hide-details
+                                :disabled="batchRunning"
+                                class="mb-2"
+                              />
+                              <v-select
+                                v-model="batchEvaluatorPromptVersion"
+                                :items="evaluatorPromptOptions"
+                                label="プロンプト"
+                                density="compact"
+                                hide-details
+                                clearable
+                                :disabled="batchRunning"
+                              />
+                            </fieldset>
                           </v-col>
                         </v-row>
                       </v-card-text>
@@ -702,7 +741,7 @@
       </v-card>
     </v-dialog>
 
-    <!-- インスタンス編集ダイアログ -->
+    <!-- 項目編集ダイアログ -->
     <v-dialog v-model="instanceDetailDialog" max-width="700">
       <v-card v-if="editingInstance">
         <v-card-title>
@@ -796,7 +835,7 @@ const itemTypeHeaders = [
   { title: '', key: 'actions', width: '80px', sortable: false },
 ];
 
-// --- 患者インスタンス ---
+// --- 患者別項目一覧 ---
 const selectedPatientId = ref<string | null>(null);
 const patientInstances = ref<IRTPatientInstance[]>([]);
 const loadingInstances = ref(false);
@@ -920,10 +959,10 @@ const createInstance = async () => {
     instanceForm.notes = '';
 
     await loadPatientInstances();
-    showSnackbar('インスタンスが追加されました');
+    showSnackbar('項目が追加されました');
   } catch (error) {
     console.error('Failed to create instance:', error);
-    showSnackbar('インスタンスの追加に失敗しました', 'error');
+    showSnackbar('項目の追加に失敗しました', 'error');
   } finally {
     creatingInstance.value = false;
   }
@@ -988,7 +1027,7 @@ const saveInstance = async () => {
     await irtApi.updatePatientInstance(id, data);
     await loadPatientInstances();
     instanceDetailDialog.value = false;
-    showSnackbar('インスタンスを更新しました');
+    showSnackbar('項目を更新しました');
   } catch (error) {
     console.error('Failed to update instance:', error);
     showSnackbar('更新に失敗しました', 'error');
@@ -998,13 +1037,13 @@ const saveInstance = async () => {
 };
 
 const deleteInstance = async () => {
-  if (!editingInstance.value || !confirm('このインスタンスを削除してもよろしいですか？')) return;
+  if (!editingInstance.value || !confirm('この項目を削除してもよろしいですか？')) return;
   savingInstance.value = true;
   try {
     await irtApi.deletePatientInstance(editingInstance.value.id as number);
     await loadPatientInstances();
     instanceDetailDialog.value = false;
-    showSnackbar('インスタンスを削除しました');
+    showSnackbar('項目を削除しました');
   } catch (error) {
     console.error('Failed to delete instance:', error);
     showSnackbar('削除に失敗しました', 'error');
@@ -1021,6 +1060,12 @@ const batchNurseModel = ref('gpt-4.1');
 const batchPatientModel = ref('gpt-4.1');
 const batchEvaluatorModel = ref('gpt-4.1');
 const modelOptions = ['gpt-4.1', 'gpt-5-mini', 'gpt-5.2', 'gpt-5-nano'];
+const batchPatientPromptVersion = ref<number | null>(null);
+const batchInterviewerPromptVersion = ref<number | null>(null);
+const batchEvaluatorPromptVersion = ref<number | null>(null);
+const patientPromptOptions = ref<Array<{ title: string; value: number }>>([]);
+const interviewerPromptOptions = ref<Array<{ title: string; value: number }>>([]);
+const evaluatorPromptOptions = ref<Array<{ title: string; value: number }>>([]);
 const batchStatus = ref<BatchStatus | null>(null);
 const batchRunning = computed(() =>
   batchStatus.value?.status === 'running' || batchStatus.value?.status === 'stopping'
@@ -1061,7 +1106,9 @@ const startBatch = async () => {
   try {
     const result = await irtApi.startBatch(
       patientIds, batchRunsPerPatient.value, batchConcurrency.value,
-      batchNurseModel.value, batchPatientModel.value, batchEvaluatorModel.value
+      batchNurseModel.value, batchPatientModel.value, batchEvaluatorModel.value,
+      batchPatientPromptVersion.value, batchInterviewerPromptVersion.value,
+      batchEvaluatorPromptVersion.value
     );
     batchStatus.value = {
       batch_id: result.batch_id,
@@ -1122,7 +1169,7 @@ const judgments = ref<IRTResponseJudgment[]>([]);
 const loadingSessions = ref(false);
 const loadingJudgments = ref(false);
 const evaluating = ref(false);
-// インスタンスID→ラベルのマップ（判定結果表示用）
+// 項目ID→ラベルのマップ（判定結果表示用）
 const instanceMap = ref<Record<number, string>>({});
 
 const sessionOptions = computed(() => {
@@ -1161,7 +1208,7 @@ const loadSessionJudgments = async () => {
   loadingJudgments.value = true;
   try {
     judgments.value = await irtApi.getSessionJudgments(selectedSessionId.value);
-    // 選択されたセッションの患者IDからインスタンスマップを構築
+    // 選択されたセッションの患者IDから項目マップを構築
     const session = sessions.value.find(s => s.session_id === selectedSessionId.value);
     if (session?.patient_id) {
       await buildInstanceMap(session.patient_id);
@@ -1194,7 +1241,7 @@ const evaluateSession = async () => {
   try {
     const result = await irtApi.evaluateSession(selectedSessionId.value);
     judgments.value = result.judgments;
-    // インスタンスマップも更新
+    // 項目マップも更新
     const session = sessions.value.find(s => s.session_id === selectedSessionId.value);
     if (session?.patient_id) {
       await buildInstanceMap(session.patient_id);
@@ -1209,9 +1256,39 @@ const evaluateSession = async () => {
 };
 
 // 判定タブに切り替えた時にセッション一覧をロード
+const loadPromptOptions = async () => {
+  try {
+    const allPrompts = await irtApi.getPrompts();
+    patientPromptOptions.value = allPrompts
+      .filter(p => p.template_type === 'patient')
+      .sort((a, b) => b.version - a.version)
+      .map(p => ({
+        title: `v${p.version}${p.is_active ? ' (active)' : ''}${p.description ? ' - ' + p.description : ''}`,
+        value: p.version,
+      }));
+    interviewerPromptOptions.value = allPrompts
+      .filter(p => p.template_type === 'interviewer')
+      .sort((a, b) => b.version - a.version)
+      .map(p => ({
+        title: `v${p.version}${p.is_active ? ' (active)' : ''}${p.description ? ' - ' + p.description : ''}`,
+        value: p.version,
+      }));
+    evaluatorPromptOptions.value = allPrompts
+      .filter(p => p.template_type === 'evaluator')
+      .sort((a, b) => b.version - a.version)
+      .map(p => ({
+        title: `v${p.version}${p.is_active ? ' (active)' : ''}${p.description ? ' - ' + p.description : ''}`,
+        value: p.version,
+      }));
+  } catch (error) {
+    console.error('Failed to load prompt options:', error);
+  }
+};
+
 watch(currentTab, (tab) => {
-  if (tab === 'judgments' && sessions.value.length === 0) {
-    loadSessions();
+  if (tab === 'judgments') {
+    if (sessions.value.length === 0) loadSessions();
+    if (patientPromptOptions.value.length === 0) loadPromptOptions();
   }
 });
 
@@ -1274,5 +1351,16 @@ pre {
   word-wrap: break-word;
   font-size: 0.85em;
   line-height: 1.4;
+}
+.batch-fieldset {
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity, 0.12));
+  border-radius: 4px;
+  padding: 8px 12px 12px;
+}
+.batch-fieldset legend {
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0 4px;
+  color: rgba(var(--v-theme-on-surface), 0.6);
 }
 </style>

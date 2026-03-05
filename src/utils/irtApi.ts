@@ -243,6 +243,18 @@ export const irtApi = {
     return await request<PatientStatsResponse>(`${baseUrl()}/v1/irt/judgments/patient/${patientId}`);
   },
 
+  // プロンプトバージョン一覧
+  async getPrompts(templateType?: string): Promise<Array<{
+    id: number;
+    template_type: string;
+    version: number;
+    description: string | null;
+    is_active: boolean;
+  }>> {
+    const query = templateType ? `?template_type=${templateType}` : '';
+    return await request(`${baseUrl()}/v1/prompts${query}`);
+  },
+
   // セッション一覧（判定対象選択用）
   async getSessions(): Promise<Array<{
     session_id: string;
@@ -262,17 +274,24 @@ export const irtApi = {
     nurseModel: string = 'gpt-4.1',
     patientModel: string = 'gpt-4.1',
     evaluatorModel: string = 'gpt-4.1',
+    patientPromptVersion: number | null = null,
+    interviewerPromptVersion: number | null = null,
+    evaluatorPromptVersion: number | null = null,
   ): Promise<BatchStartResponse> {
+    const body: Record<string, unknown> = {
+      patient_ids: patientIds,
+      runs_per_patient: runsPerPatient,
+      concurrency,
+      nurse_model: nurseModel,
+      patient_model: patientModel,
+      evaluator_model: evaluatorModel,
+    };
+    if (patientPromptVersion !== null) body.patient_prompt_version = patientPromptVersion;
+    if (interviewerPromptVersion !== null) body.interviewer_prompt_version = interviewerPromptVersion;
+    if (evaluatorPromptVersion !== null) body.evaluator_prompt_version = evaluatorPromptVersion;
     return await request<BatchStartResponse>(`${baseUrl()}/v1/irt/batch/start`, {
       method: 'POST',
-      body: JSON.stringify({
-        patient_ids: patientIds,
-        runs_per_patient: runsPerPatient,
-        concurrency,
-        nurse_model: nurseModel,
-        patient_model: patientModel,
-        evaluator_model: evaluatorModel,
-      }),
+      body: JSON.stringify(body),
     });
   },
 

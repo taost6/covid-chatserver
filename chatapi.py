@@ -1505,38 +1505,17 @@ def api(config):
         ])
 
         # 4. 判定用プロンプト取得
+        prompt_db = modelDatabase.PromptSessionLocal()
         try:
-            prompt_db = modelDatabase.PromptSessionLocal()
             prompt_service = PromptTemplateService(prompt_db)
-            irt_eval_template = prompt_service.get_active_template('irt_evaluator')
+            irt_eval_template = prompt_service.get_active_template('evaluator')
+        finally:
             prompt_db.close()
 
-            if irt_eval_template:
-                base_prompt = irt_eval_template.prompt_text
-            else:
-                base_prompt = (
-                    "あなたは積極的疫学調査の評価専門家です。\n"
-                    "以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。\n\n"
-                    "判定基準: 「会話にて言及されたかどうか」を代理指標とする。\n"
-                    "- is_correct=true: 当該情報が会話中に出現した（保健師が質問し、患者が回答した）\n"
-                    "- is_correct=false: 当該情報が会話中に出現しなかった\n"
-                    "- confidence: 判定の確信度(0.0-1.0)\n"
-                    "- reasoning: 判定の根拠を簡潔に記述\n\n"
-                    "必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"
-                )
-                logger.warning("IRT evaluator template not found in DB, using fallback prompt")
-        except Exception as e:
-            base_prompt = (
-                "あなたは積極的疫学調査の評価専門家です。\n"
-                "以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。\n\n"
-                "判定基準: 「会話にて言及されたかどうか」を代理指標とする。\n"
-                "- is_correct=true: 当該情報が会話中に出現した\n"
-                "- is_correct=false: 当該情報が会話中に出現しなかった\n"
-                "- confidence: 判定の確信度(0.0-1.0)\n"
-                "- reasoning: 判定の根拠を簡潔に記述\n\n"
-                "必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"
-            )
-            logger.error(f"Failed to load IRT evaluator template: {e}")
+        if not irt_eval_template:
+            raise RuntimeError("評価者プロンプトがDBに登録されていません。プロンプト管理画面から登録してください。")
+
+        base_prompt = irt_eval_template.prompt_text
 
         full_prompt = (
             f"{base_prompt}\n\n"
@@ -1817,6 +1796,9 @@ def api(config):
         nurse_model: str = "gpt-4.1"
         patient_model: str = "gpt-4.1"
         evaluator_model: str = "gpt-4.1"
+        patient_prompt_version: Optional[int] = None
+        interviewer_prompt_version: Optional[int] = None
+        evaluator_prompt_version: Optional[int] = None
 
     @app.post("/v1/irt/batch/start")
     async def start_irt_batch(req: BatchStartRequest):
@@ -1832,10 +1814,13 @@ def api(config):
             req.patient_ids, req.runs_per_patient, req.concurrency,
             nurse_model=req.nurse_model,
             patient_model=req.patient_model,
-            evaluator_model=req.evaluator_model
+            evaluator_model=req.evaluator_model,
+            patient_prompt_version=req.patient_prompt_version,
+            interviewer_prompt_version=req.interviewer_prompt_version,
+            evaluator_prompt_version=req.evaluator_prompt_version,
         )
         total = len(req.patient_ids) * req.runs_per_patient
-        logger.info(f"IRT batch started: batch_id={batch_id} total={total} models=nurse:{req.nurse_model}/patient:{req.patient_model}/eval:{req.evaluator_model}")
+        logger.info(f"IRT batch started: batch_id={batch_id} total={total} models=nurse:{req.nurse_model}/patient:{req.patient_model}/eval:{req.evaluator_model} prompt_ver=patient:{req.patient_prompt_version}/interviewer:{req.interviewer_prompt_version}/evaluator:{req.evaluator_prompt_version}")
         return {"batch_id": batch_id, "total_tasks": total}
 
     @app.get("/v1/irt/batch/status/{batch_id}")

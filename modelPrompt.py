@@ -29,6 +29,13 @@ class PromptTemplateService:
             PromptTemplate.is_active == True
         ).first()
     
+    def get_template_by_version(self, template_type: str, version: int) -> Optional[PromptTemplate]:
+        """指定されたtypeとversionのテンプレートを取得"""
+        return self.db.query(PromptTemplate).filter(
+            PromptTemplate.template_type == template_type,
+            PromptTemplate.version == version
+        ).first()
+
     def get_all_templates(self, template_type: str = None) -> List[PromptTemplate]:
         """すべてのテンプレートを取得（オプションでtype絞り込み）"""
         query = self.db.query(PromptTemplate)

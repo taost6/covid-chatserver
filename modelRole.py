@@ -161,7 +161,7 @@ class PatientRoleProvider:
 
         return [chunk for chunk in chunks if chunk] # 空のチャンクを除外
 
-    def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None) -> (List[str], str):
+    def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None, prompt_version: int = None) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
         interview_date_strが指定された場合はその日付を、されなければ動的に日付を決定する。
@@ -219,9 +219,12 @@ class PatientRoleProvider:
             
             prompt_db = modelDatabase.PromptSessionLocal()
             prompt_service = PromptTemplateService(prompt_db)
-            patient_template = prompt_service.get_active_template('patient')
+            if prompt_version is not None:
+                patient_template = prompt_service.get_template_by_version('patient', prompt_version)
+            else:
+                patient_template = prompt_service.get_active_template('patient')
             prompt_db.close()
-            
+
             if patient_template:
                 base_prompt = patient_template.prompt_text
                 # 面接日の変数を置換
@@ -378,7 +381,7 @@ class PatientRoleProvider:
         return details
 
 
-    def get_interviewer_prompt_chunks(self, interview_date_str: str = None) -> (List[str], str):
+    def get_interviewer_prompt_chunks(self, interview_date_str: str = None, prompt_version: int = None) -> (List[str], str):
         """
         保健師AI用のプロンプトと初期メッセージを返す。
         interview_date_str: 傍聴者モード時に調査日情報を追加するための日付文字列
@@ -390,9 +393,12 @@ class PatientRoleProvider:
             
             prompt_db = modelDatabase.PromptSessionLocal()
             prompt_service = PromptTemplateService(prompt_db)
-            interviewer_template = prompt_service.get_active_template('interviewer')
+            if prompt_version is not None:
+                interviewer_template = prompt_service.get_template_by_version('interviewer', prompt_version)
+            else:
+                interviewer_template = prompt_service.get_active_template('interviewer')
             prompt_db.close()
-            
+
             if interviewer_template:
                 prompt = interviewer_template.prompt_text
                 # 傍聴者モード時に日付情報を追加

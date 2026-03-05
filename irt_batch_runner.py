@@ -29,12 +29,16 @@ class HeadlessConversation:
     MAX_TURNS = 100
 
     def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, db,
-                 nurse_model: Optional[str] = None, patient_model: Optional[str] = None):
+                 nurse_model: Optional[str] = None, patient_model: Optional[str] = None,
+                 patient_prompt_version: Optional[int] = None,
+                 interviewer_prompt_version: Optional[int] = None):
         self.oaw = oaw
         self.role_provider = role_provider
         self.db = db
         self.nurse_model = nurse_model
         self.patient_model = patient_model
+        self.patient_prompt_version = patient_prompt_version
+        self.interviewer_prompt_version = interviewer_prompt_version
 
     async def run(self, patient_id: str, session_id: str) -> dict:
         """1セッション分の対話を実行して結果を返す"""
@@ -62,7 +66,9 @@ class HeadlessConversation:
             )
 
             # 3. プロンプト設定
-            patient_chunks, interview_date_str = self.role_provider.get_patient_prompt_chunks(patient_id)
+            patient_chunks, interview_date_str = self.role_provider.get_patient_prompt_chunks(
+                patient_id, prompt_version=self.patient_prompt_version
+            )
             for chunk in patient_chunks:
                 await self.oaw.add_message_to_thread(patient_ai.thread_id, chunk)
                 await log_message(
@@ -76,7 +82,10 @@ class HeadlessConversation:
             try:
                 prompt_db = modelDatabase.PromptSessionLocal()
                 prompt_service = PromptTemplateService(prompt_db)
-                patient_template = prompt_service.get_active_template('patient')
+                if self.patient_prompt_version is not None:
+                    patient_template = prompt_service.get_template_by_version('patient', self.patient_prompt_version)
+                else:
+                    patient_template = prompt_service.get_active_template('patient')
                 prompt_db.close()
                 if patient_template and patient_template.message_text:
                     initial_patient_message = patient_template.message_text.replace('{patient_name}', patient_name)
@@ -92,7 +101,9 @@ class HeadlessConversation:
             )
 
             # 保健師AIプロンプト設定
-            interviewer_chunks, initial_nurse_message = self.role_provider.get_interviewer_prompt_chunks(interview_date_str)
+            interviewer_chunks, initial_nurse_message = self.role_provider.get_interviewer_prompt_chunks(
+                interview_date_str, prompt_version=self.interviewer_prompt_version
+            )
             for chunk in interviewer_chunks:
                 await self.oaw.add_message_to_thread(nurse_ai.thread_id, chunk)
                 await log_message(
@@ -229,7 +240,10 @@ class IRTBatchRunner:
 
     async def start_batch(self, patient_ids: List[str], runs_per_patient: int, concurrency: int,
                           nurse_model: Optional[str] = None, patient_model: Optional[str] = None,
-                          evaluator_model: Optional[str] = None) -> str:
+                          evaluator_model: Optional[str] = None,
+                          patient_prompt_version: Optional[int] = None,
+                          interviewer_prompt_version: Optional[int] = None,
+                          evaluator_prompt_version: Optional[int] = None) -> str:
         batch_id = get_id()
         total = len(patient_ids) * runs_per_patient
 
@@ -246,6 +260,9 @@ class IRTBatchRunner:
             "nurse_model": nurse_model,
             "patient_model": patient_model,
             "evaluator_model": evaluator_model,
+            "patient_prompt_version": patient_prompt_version,
+            "interviewer_prompt_version": interviewer_prompt_version,
+            "evaluator_prompt_version": evaluator_prompt_version,
         }
         self.batches[batch_id] = state
 
@@ -287,8 +304,16 @@ class IRTBatchRunner:
                     # プロンプトバージョン取得
                     prompt_db = modelDatabase.PromptSessionLocal()
                     prompt_service = PromptTemplateService(prompt_db)
-                    patient_tmpl = prompt_service.get_active_template('patient')
-                    interviewer_tmpl = prompt_service.get_active_template('interviewer')
+                    p_ver = state.get("patient_prompt_version")
+                    i_ver = state.get("interviewer_prompt_version")
+                    if p_ver is not None:
+                        patient_tmpl = prompt_service.get_template_by_version('patient', p_ver)
+                    else:
+                        patient_tmpl = prompt_service.get_active_template('patient')
+                    if i_ver is not None:
+                        interviewer_tmpl = prompt_service.get_template_by_version('interviewer', i_ver)
+                    else:
+                        interviewer_tmpl = prompt_service.get_active_template('interviewer')
                     prompt_db.close()
 
                     db_session = SessionModel(
@@ -310,7 +335,9 @@ class IRTBatchRunner:
                     conv = HeadlessConversation(
                         self.oaw, self.role_provider, db,
                         nurse_model=state["nurse_model"],
-                        patient_model=state["patient_model"]
+                        patient_model=state["patient_model"],
+                        patient_prompt_version=p_ver,
+                        interviewer_prompt_version=i_ver,
                     )
                     conv_result = await conv.run(patient_id, session_id)
 
@@ -323,7 +350,8 @@ class IRTBatchRunner:
 
                     # IRT判定実行
                     judgment_result = await self._execute_irt_judgment_for_batch(
-                        session_id, db, evaluator_model=state["evaluator_model"]
+                        session_id, db, evaluator_model=state["evaluator_model"],
+                        evaluator_prompt_version=state.get("evaluator_prompt_version")
                     )
 
                     result_entry["status"] = "completed"
@@ -369,7 +397,8 @@ class IRTBatchRunner:
         )
 
     async def _execute_irt_judgment_for_batch(self, session_id: str, db,
-                                               evaluator_model: Optional[str] = None) -> dict:
+                                               evaluator_model: Optional[str] = None,
+                                               evaluator_prompt_version: Optional[int] = None) -> dict:
         """バッチ用IRT判定（chatapi._execute_irt_judgmentのロジックを再利用）"""
 
         session_record = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
@@ -412,18 +441,20 @@ class IRTBatchRunner:
         ])
 
         # 判定用プロンプト取得
+        prompt_db = modelDatabase.PromptSessionLocal()
         try:
-            prompt_db = modelDatabase.PromptSessionLocal()
             prompt_service = PromptTemplateService(prompt_db)
-            irt_eval_template = prompt_service.get_active_template('irt_evaluator')
+            if evaluator_prompt_version is not None:
+                irt_eval_template = prompt_service.get_template_by_version('evaluator', evaluator_prompt_version)
+            else:
+                irt_eval_template = prompt_service.get_active_template('evaluator')
+        finally:
             prompt_db.close()
 
-            if irt_eval_template:
-                base_prompt = irt_eval_template.prompt_text
-            else:
-                base_prompt = self._fallback_irt_prompt()
-        except Exception:
-            base_prompt = self._fallback_irt_prompt()
+        if not irt_eval_template:
+            raise RuntimeError("評価者プロンプトがDBに登録されていません。プロンプト管理画面から登録してください。")
+
+        base_prompt = irt_eval_template.prompt_text
 
         full_prompt = (
             f"{base_prompt}\n\n"
@@ -522,19 +553,6 @@ class IRTBatchRunner:
             "correct_count": correct_count,
             "total_count": len(saved),
         }
-
-    @staticmethod
-    def _fallback_irt_prompt() -> str:
-        return (
-            "あなたは積極的疫学調査の評価専門家です。\n"
-            "以下の対話ログを分析し、各IRT項目について「保健師が正しく聴取できたか」を判定してください。\n\n"
-            "判定基準: 「会話にて言及されたかどうか」を代理指標とする。\n"
-            "- is_correct=true: 当該情報が会話中に出現した（保健師が質問し、患者が回答した）\n"
-            "- is_correct=false: 当該情報が会話中に出現しなかった\n"
-            "- confidence: 判定の確信度(0.0-1.0)\n"
-            "- reasoning: 判定の根拠を簡潔に記述\n\n"
-            "必ず submit_irt_judgments 関数を呼び出して結果を提出してください。"
-        )
 
     def get_status(self, batch_id: str) -> Optional[dict]:
         state = self.batches.get(batch_id)
