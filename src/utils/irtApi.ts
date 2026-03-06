@@ -172,6 +172,13 @@ export const irtApi = {
     return await request<IRTItemType>(`${baseUrl()}/v1/irt/item-types/${code}`);
   },
 
+  async createItemType(data: Record<string, unknown>): Promise<IRTItemType> {
+    return await request<IRTItemType>(`${baseUrl()}/v1/irt/item-types`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
   async bulkCreateItemTypes(items: Record<string, unknown>[]): Promise<{ created: number }> {
     return await request<{ created: number }>(`${baseUrl()}/v1/irt/item-types/bulk`, {
       method: 'POST',

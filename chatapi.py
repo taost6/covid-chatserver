@@ -1352,6 +1352,40 @@ def api(config):
             created_at=it.created_at
         )
 
+    class IRTItemTypeCreateRequest(BaseModel):
+        catalog_version: int
+        code: str
+        category: str
+        name_ja: str
+        name_en: str
+        description: Optional[str] = None
+        investigation_phase: Optional[str] = None
+        pdf_priority: Optional[str] = None
+        investigation_direction: Optional[str] = None
+        frequency: Optional[str] = None
+        intensity: Optional[str] = None
+        status: str = 'active'
+
+    @app.post("/v1/irt/item-types")
+    async def create_irt_item_type(req: IRTItemTypeCreateRequest, db: Session = Depends(get_db)):
+        """IRT項目タイプを単一作成"""
+        service = IRTItemTypeService(db)
+        it = service.create_item_type(
+            catalog_version=req.catalog_version, code=req.code, category=req.category,
+            name_ja=req.name_ja, name_en=req.name_en, description=req.description,
+            investigation_phase=req.investigation_phase, pdf_priority=req.pdf_priority,
+            investigation_direction=req.investigation_direction,
+            frequency=req.frequency, intensity=req.intensity, status=req.status
+        )
+        return IRTItemTypeResponse(
+            id=it.id, catalog_version=it.catalog_version, code=it.code,
+            category=it.category, name_ja=it.name_ja, name_en=it.name_en,
+            description=it.description, investigation_phase=it.investigation_phase,
+            pdf_priority=it.pdf_priority, investigation_direction=it.investigation_direction,
+            frequency=it.frequency, intensity=it.intensity, status=it.status,
+            created_at=it.created_at
+        )
+
     @app.post("/v1/irt/item-types/bulk")
     async def bulk_create_irt_item_types(req: IRTItemTypeBulkRequest, db: Session = Depends(get_db)):
         """IRT項目タイプを一括登録"""

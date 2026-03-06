@@ -34,6 +34,12 @@
                       </v-chip-group>
                     </div>
 
+                    <div class="d-flex justify-end mb-2">
+                      <v-btn color="primary" size="small" @click="showAddItemTypeDialog">
+                        項目タイプ追加
+                      </v-btn>
+                    </div>
+
                     <!-- 項目タイプテーブル -->
                     <v-data-table
                       :headers="itemTypeHeaders"
@@ -741,6 +747,52 @@
       </v-card>
     </v-dialog>
 
+    <!-- 項目タイプ追加ダイアログ -->
+    <v-dialog v-model="addItemTypeDialog" max-width="700">
+      <v-card>
+        <v-card-title>項目タイプ追加</v-card-title>
+        <v-card-text>
+          <v-row>
+            <v-col cols="4">
+              <v-text-field v-model="newItemType.code" label="コード (例: T-3)" density="compact" required />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="newItemType.category" :items="categories.map(c => c.value)" label="カテゴリ" density="compact" required />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="newItemType.status" :items="['active','candidate','deprecated']" label="状態" density="compact" />
+            </v-col>
+          </v-row>
+          <v-text-field v-model="newItemType.name_ja" label="項目名（日本語）" density="compact" class="mb-2" required />
+          <v-text-field v-model="newItemType.name_en" label="項目名（英語）" density="compact" class="mb-2" required />
+          <v-textarea v-model="newItemType.description" label="説明" rows="3" density="compact" class="mb-2" />
+          <v-row>
+            <v-col cols="4">
+              <v-select v-model="newItemType.investigation_direction" :items="['forward','backward','both','none']" label="調査方向" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="newItemType.frequency" :items="['High','Low','Variable']" label="頻度" density="compact" clearable />
+            </v-col>
+            <v-col cols="4">
+              <v-select v-model="newItemType.intensity" :items="['High','Low','Variable']" label="強度" density="compact" clearable />
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="addItemTypeDialog = false">キャンセル</v-btn>
+          <v-btn
+            color="primary"
+            @click="createItemType"
+            :loading="creatingItemType"
+            :disabled="!newItemType.code || !newItemType.category || !newItemType.name_ja || !newItemType.name_en"
+          >
+            追加
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- 項目編集ダイアログ -->
     <v-dialog v-model="instanceDetailDialog" max-width="700">
       <v-card v-if="editingInstance">
@@ -812,6 +864,19 @@ const itemTypes = ref<IRTItemType[]>([]);
 const loadingItemTypes = ref(false);
 const selectedCategory = ref('');
 const itemTypeDetailDialog = ref(false);
+const addItemTypeDialog = ref(false);
+const creatingItemType = ref(false);
+const newItemType = ref({
+  code: '',
+  category: '',
+  name_ja: '',
+  name_en: '',
+  description: '',
+  investigation_direction: null as string | null,
+  frequency: null as string | null,
+  intensity: null as string | null,
+  status: 'active',
+});
 
 const categories = [
   { value: 'D', label: 'D: 疾病臨床' },
@@ -973,6 +1038,33 @@ const editingItemType = ref<Record<string, unknown> | null>(null);
 const savingItemType = ref(false);
 const editingInstance = ref<Record<string, unknown> | null>(null);
 const savingInstance = ref(false);
+
+const showAddItemTypeDialog = () => {
+  const latestVersion = itemTypes.value.length > 0
+    ? Math.max(...itemTypes.value.map(it => it.catalog_version))
+    : 1;
+  newItemType.value = {
+    code: '', category: '', name_ja: '', name_en: '', description: '',
+    investigation_direction: null, frequency: null, intensity: null, status: 'active',
+  };
+  Object.assign(newItemType.value, { catalog_version: latestVersion });
+  addItemTypeDialog.value = true;
+};
+
+const createItemType = async () => {
+  creatingItemType.value = true;
+  try {
+    await irtApi.createItemType(newItemType.value);
+    await loadItemTypes();
+    addItemTypeDialog.value = false;
+    showSnackbar('項目タイプを追加しました');
+  } catch (error) {
+    console.error('Failed to create item type:', error);
+    showSnackbar('項目タイプの追加に失敗しました', 'error');
+  } finally {
+    creatingItemType.value = false;
+  }
+};
 
 const showItemTypeDetail = (item: IRTItemType) => {
   editingItemType.value = { ...item };
