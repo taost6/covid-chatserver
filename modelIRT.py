@@ -302,3 +302,13 @@ class IRTResponseJudgmentService:
         ).delete()
         self.db.commit()
         return count
+
+    def delete_judgments_for_instance_ids(self, instance_ids: List[int]) -> int:
+        """指定インスタンスIDに紐づく全判定結果を削除"""
+        if not instance_ids:
+            return 0
+        count = self.db.query(IRTResponseJudgment).filter(
+            IRTResponseJudgment.instance_id.in_(instance_ids)
+        ).delete(synchronize_session='fetch')
+        self.db.commit()
+        return count

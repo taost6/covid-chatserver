@@ -1483,6 +1483,28 @@ def api(config):
             raise HTTPException(status_code=404, detail="Instance not found")
         return {"deleted": True}
 
+    @app.delete("/v1/irt/patient-instances/patient/{patient_id}")
+    async def delete_all_irt_patient_instances(patient_id: str, db: Session = Depends(get_db)):
+        """患者IDの全インスタンスと関連判定結果を一括削除"""
+        inst_service = IRTPatientInstanceService(db)
+        instances = inst_service.get_instances_for_patient(patient_id)
+        if not instances:
+            return {"deleted_instances": 0, "deleted_judgments": 0}
+
+        instance_ids = [inst.id for inst in instances]
+
+        # 判定結果を先に削除
+        judgment_service = IRTResponseJudgmentService(db)
+        deleted_judgments = judgment_service.delete_judgments_for_instance_ids(instance_ids)
+
+        # インスタンス削除
+        deleted_instances = 0
+        for inst in instances:
+            inst_service.delete_instance(inst.id)
+            deleted_instances += 1
+
+        return {"deleted_instances": deleted_instances, "deleted_judgments": deleted_judgments}
+
     # --- IRT Judgment API ---
 
     async def _execute_irt_judgment(session_id: str, db: Session):
