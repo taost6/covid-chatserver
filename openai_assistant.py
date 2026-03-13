@@ -112,6 +112,11 @@ class ConversationState:
 
 
 class OpenAIAssistantWrapper():
+    # Reasoningモデル判定用パターン
+    # o-series (o1, o3, o4-mini等) および gpt-5.4 が該当
+    REASONING_MODEL_PREFIXES = ('o1', 'o3', 'o4')
+    REASONING_MODEL_NAMES = ('gpt-5.4',)
+
     def __init__(self, config):
         self.config = config
         self.client = AsyncOpenAI(
@@ -120,6 +125,22 @@ class OpenAIAssistantWrapper():
         self.rate_limit_info = RateLimitInfo()
         self._conversations: Dict[str, ConversationState] = {}
         self._assistant_cache: Dict[str, dict] = {}  # assistant_id -> {model, instructions}
+
+    @classmethod
+    def _is_reasoning_model(cls, model_name: str) -> bool:
+        """Reasoningモデルかどうかを判定する。
+        Reasoningモデルでは system ロールが使えず developer ロールを使用する必要がある。
+        また、プロンプト注入メッセージも developer ロールで渡すべき。
+        """
+        if not model_name:
+            return False
+        name = model_name.lower()
+        if name.startswith(cls.REASONING_MODEL_PREFIXES):
+            return True
+        for rn in cls.REASONING_MODEL_NAMES:
+            if rn in name:
+                return True
+        return False
 
     async def create_thread(self):
         """会話コンテキストを作成（ローカル ID を返す）"""
@@ -348,6 +369,11 @@ class OpenAIAssistantWrapper():
                 cached = await self._get_cached_assistant_info(assistant.assistant_id)
                 actual_model = cached.get("model", "gpt-4.1")
 
+            # Reasoningモデル判定
+            is_reasoning = self._is_reasoning_model(actual_model)
+            if is_reasoning:
+                logging.info(f"Reasoning model detected: {actual_model} — using developer role for prompt injection")
+
             # input を構築
             input_messages = []
 
@@ -362,7 +388,14 @@ class OpenAIAssistantWrapper():
                 conv.unresolved_call_id = None
 
             # pending_messages + 新メッセージ
-            input_messages.extend(conv.pending_messages)
+            # Reasoningモデルの場合、プロンプト注入メッセージ(user)を developer ロールに変換
+            # これにより、指示がシステムレベルの指示として正しく解釈される
+            for msg in conv.pending_messages:
+                if is_reasoning and msg.get("role") == "user":
+                    input_messages.append({"role": "developer", "content": msg["content"]})
+                else:
+                    input_messages.append(msg)
+
             input_messages.append({"role": "user", "content": request_text})
 
             # API パラメータ構築
@@ -379,6 +412,10 @@ class OpenAIAssistantWrapper():
                 api_params["tool_choice"] = tool_choice
             if conv.last_response_id:
                 api_params["previous_response_id"] = conv.last_response_id
+
+            # Reasoningモデルの場合、reasoning を有効化
+            if is_reasoning:
+                api_params["reasoning"] = {"effort": "medium"}
 
             # レート制限エラーに対するリトライ機能
             for attempt in range(max_retries + 1):
