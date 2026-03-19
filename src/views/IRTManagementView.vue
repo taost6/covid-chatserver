@@ -466,7 +466,7 @@
                               @update:model-value="loadSessionJudgments"
                             />
                           </v-col>
-                          <v-col cols="auto" class="ml-4">
+                          <!-- <v-col cols="auto" class="ml-4">
                             <v-btn
                               color="primary"
                               size="small"
@@ -475,6 +475,16 @@
                               @click="evaluateSession"
                             >
                               判定実行
+                            </v-btn>
+                          </v-col> -->
+                          <v-col v-if="selectedSessionId" cols="auto" class="ml-2">
+                            <v-btn
+                              size="small"
+                              variant="text"
+                              :to="{ name: 'history-detail', params: { sessionId: selectedSessionId } }"
+                              prepend-icon="mdi-message-text-outline"
+                            >
+                              対話ログ
                             </v-btn>
                           </v-col>
                           <v-spacer />
@@ -1270,7 +1280,7 @@ const sessionOptions = computed(() => {
     .filter(s => s.patient_id)
     .map(s => ({
       value: s.session_id,
-      label: `${s.patient_id ? '患者' + s.patient_id : ''} / ${s.user_role} / ${s.user_name} (${new Date(s.started_at).toLocaleDateString('ja-JP')})`,
+      label: `${s.session_id.substring(0, 8)} | 患者${s.patient_id || '?'} / ${s.user_role} / ${s.user_name} (${new Date(s.started_at).toLocaleString('ja-JP')})`,
     }));
 });
 
