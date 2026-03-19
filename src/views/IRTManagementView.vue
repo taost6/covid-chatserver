@@ -608,11 +608,12 @@
                         <v-card-title class="text-subtitle-1">項目別正答率</v-card-title>
                         <v-data-table
                           :headers="patientItemHeaders"
-                          :items="patientStats.item_stats.filter(i => i.is_detectable)"
+                          :items="patientStats.item_stats"
                           item-value="instance_id"
                           hover
                           density="comfortable"
                           show-expand
+                          :row-props="(row: any) => !row.item.is_detectable ? { class: 'bg-grey-lighten-3 text-grey' } : {}"
                         >
                           <template #item.item_type_code="{ item }">
                             <v-chip size="small" variant="tonal" :color="item.is_detectable ? 'primary' : 'grey'">
