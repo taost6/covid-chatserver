@@ -623,7 +623,11 @@
                           hover
                           density="comfortable"
                           show-expand
-                          :row-props="(row: any) => !row.item.is_detectable ? { class: 'bg-grey-lighten-3 text-grey' } : {}"
+                          :row-props="(row: any) => {
+                            if (!row.item.is_detectable) return { class: 'bg-grey-lighten-3 text-grey' };
+                            if (row.item.is_excluded_from_analysis) return { class: 'bg-orange-lighten-4 text-decoration-line-through' };
+                            return {};
+                          }"
                         >
                           <template #item.item_type_code="{ item }">
                             <v-chip size="small" variant="tonal" :color="item.is_detectable ? 'primary' : 'grey'">
@@ -645,6 +649,10 @@
                                 </template>
                               </v-progress-linear>
                             </div>
+                          </template>
+                          <template #item.risk_score="{ item }">
+                            <span v-if="item.risk_score != null">{{ item.risk_score.toFixed(2) }}</span>
+                            <span v-else class="text-grey">—</span>
                           </template>
                           <template #expanded-row="{ columns, item }">
                             <tr>
@@ -844,6 +852,8 @@
           </v-row>
           <v-text-field v-model="editingInstance.related_patient_ids" label="関連患者ID (JSON配列)" density="compact" class="mb-2" />
           <v-checkbox v-model="editingInstance.is_detectable" label="検出可能" density="compact" hide-details class="mb-2" />
+          <v-checkbox v-model="editingInstance.is_excluded_from_analysis" label="分析から除外（局所依存性）" density="compact" hide-details class="mb-2" />
+          <v-text-field v-model.number="editingInstance.risk_score" label="リスクスコア (0〜1)" type="number" step="0.01" min="0" max="1" density="compact" clearable class="mb-2" />
           <v-textarea v-model="editingInstance.notes" label="備考" rows="2" density="compact" />
         </v-card-text>
         <v-card-actions>
@@ -1404,6 +1414,7 @@ const statsLoadedOnce = ref(false);
 const patientItemHeaders = [
   { title: '項目', key: 'item_type_code', width: '110px' },
   { title: '説明', key: 'description' },
+  { title: 'リスク', key: 'risk_score', width: '80px' },
   { title: '判定数', key: 'total_judgments', width: '80px' },
   { title: '正答数', key: 'correct_count', width: '80px' },
   { title: '正答率', key: 'accuracy', width: '140px' },

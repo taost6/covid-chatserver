@@ -49,6 +49,8 @@ class IRTPatientInstance(Base):
     density_close_contact = Column(String(10), nullable=True)  # 密接: High, Low, Unknown
     related_patient_ids = Column(Text, nullable=True)        # JSON array string
     is_detectable = Column(Boolean, default=True, nullable=False)
+    is_excluded_from_analysis = Column(Boolean, default=False)
+    risk_score = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -275,6 +275,8 @@ class IRTPatientInstanceResponse(BaseModel):
     density_close_contact: Optional[str]
     related_patient_ids: Optional[str]
     is_detectable: bool
+    is_excluded_from_analysis: bool
+    risk_score: Optional[float]
     notes: Optional[str]
     created_at: datetime
 
@@ -307,6 +309,8 @@ class PatientItemStat(BaseModel):
     instance_number: int
     description: Optional[str]
     is_detectable: bool
+    is_excluded_from_analysis: bool
+    risk_score: Optional[float]
     total_judgments: int
     correct_count: int
     accuracy: float
@@ -1412,7 +1416,10 @@ def api(config):
                 density_closed=inst.density_closed, density_crowded=inst.density_crowded,
                 density_close_contact=inst.density_close_contact,
                 related_patient_ids=inst.related_patient_ids,
-                is_detectable=inst.is_detectable, notes=inst.notes,
+                is_detectable=inst.is_detectable,
+                is_excluded_from_analysis=inst.is_excluded_from_analysis or False,
+                risk_score=inst.risk_score,
+                notes=inst.notes,
                 created_at=inst.created_at
             ) for inst in instances
         ]
@@ -1471,7 +1478,10 @@ def api(config):
             density_closed=inst.density_closed, density_crowded=inst.density_crowded,
             density_close_contact=inst.density_close_contact,
             related_patient_ids=inst.related_patient_ids,
-            is_detectable=inst.is_detectable, notes=inst.notes,
+            is_detectable=inst.is_detectable,
+            is_excluded_from_analysis=inst.is_excluded_from_analysis or False,
+            risk_score=inst.risk_score,
+            notes=inst.notes,
             created_at=inst.created_at
         )
 
@@ -1806,6 +1816,8 @@ def api(config):
                 instance_number=inst.instance_number,
                 description=inst.description,
                 is_detectable=inst.is_detectable,
+                is_excluded_from_analysis=inst.is_excluded_from_analysis or False,
+                risk_score=inst.risk_score,
                 total_judgments=total,
                 correct_count=correct,
                 accuracy=accuracy,

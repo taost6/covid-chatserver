@@ -30,6 +30,8 @@ export interface IRTPatientInstance {
   density_close_contact: string | null;
   related_patient_ids: string | null;
   is_detectable: boolean;
+  is_excluded_from_analysis: boolean;
+  risk_score: number | null;
   notes: string | null;
   created_at: string;
 }
@@ -90,6 +92,8 @@ export interface PatientItemStat {
   instance_number: number;
   description: string | null;
   is_detectable: boolean;
+  is_excluded_from_analysis: boolean;
+  risk_score: number | null;
   total_judgments: number;
   correct_count: number;
   accuracy: number;
