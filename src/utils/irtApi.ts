@@ -32,6 +32,7 @@ export interface IRTPatientInstance {
   is_detectable: boolean;
   is_excluded_from_analysis: boolean;
   risk_score: number | null;
+  pairwise_risk_score: number | null;
   notes: string | null;
   created_at: string;
 }

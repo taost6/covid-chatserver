@@ -51,6 +51,7 @@ class IRTPatientInstance(Base):
     is_detectable = Column(Boolean, default=True, nullable=False)
     is_excluded_from_analysis = Column(Boolean, default=False)
     risk_score = Column(Float, nullable=True)
+    pairwise_risk_score = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

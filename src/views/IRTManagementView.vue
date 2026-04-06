@@ -654,6 +654,12 @@
                             <span v-if="item.risk_score != null">{{ item.risk_score.toFixed(2) }}</span>
                             <span v-else class="text-grey">—</span>
                           </template>
+                          <template #item.pairwise_risk_score="{ item }">
+                            <span v-if="item.pairwise_risk_score != null" :class="pairwiseScoreColor(item.pairwise_risk_score)">
+                              {{ item.pairwise_risk_score.toFixed(3) }}
+                            </span>
+                            <span v-else class="text-grey">—</span>
+                          </template>
                           <template #expanded-row="{ columns, item }">
                             <tr>
                               <td :colspan="columns.length" class="pa-2">
@@ -1411,10 +1417,17 @@ const patientStats = ref<PatientStatsResponse | null>(null);
 const loadingStats = ref(false);
 const statsLoadedOnce = ref(false);
 
+const pairwiseScoreColor = (score: number): string => {
+  if (score >= 0.7) return 'text-red-darken-2 font-weight-bold';
+  if (score >= 0.4) return 'text-orange-darken-2';
+  return 'text-blue-darken-1';
+};
+
 const patientItemHeaders = [
   { title: '項目', key: 'item_type_code', width: '110px' },
   { title: '説明', key: 'description' },
-  { title: 'リスク', key: 'risk_score', width: '80px' },
+  { title: 'リスク(旧)', key: 'risk_score', width: '80px' },
+  { title: 'リスク(BT)', key: 'pairwise_risk_score', width: '90px' },
   { title: '判定数', key: 'total_judgments', width: '80px' },
   { title: '正答数', key: 'correct_count', width: '80px' },
   { title: '正答率', key: 'accuracy', width: '140px' },
