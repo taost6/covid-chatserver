@@ -312,6 +312,7 @@ class PatientItemStat(BaseModel):
     is_detectable: bool
     is_excluded_from_analysis: bool
     risk_score: Optional[float]
+    pairwise_risk_score: Optional[float]
     total_judgments: int
     correct_count: int
     accuracy: float
@@ -1821,6 +1822,7 @@ def api(config):
                 is_detectable=inst.is_detectable,
                 is_excluded_from_analysis=inst.is_excluded_from_analysis or False,
                 risk_score=inst.risk_score,
+                pairwise_risk_score=inst.pairwise_risk_score,
                 total_judgments=total,
                 correct_count=correct,
                 accuracy=accuracy,
