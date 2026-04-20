@@ -668,8 +668,20 @@
                             <span v-else class="text-grey">—</span>
                           </template>
                           <template #item.pairwise_risk_score="{ item }">
-                            <span v-if="displayedScore(item) != null" :class="pairwiseScoreColor(displayedScore(item)!)">
-                              {{ displayedScore(item)!.toFixed(3) }}
+                            <span v-if="item.pairwise_risk_score != null" :class="pairwiseScoreColor(item.pairwise_risk_score)">
+                              {{ item.pairwise_risk_score.toFixed(3) }}
+                            </span>
+                            <span v-else class="text-grey">—</span>
+                          </template>
+                          <template #item.pairwise_risk_score_forward="{ item }">
+                            <span v-if="item.pairwise_risk_score_forward != null" :class="pairwiseScoreColor(item.pairwise_risk_score_forward)">
+                              {{ item.pairwise_risk_score_forward.toFixed(3) }}
+                            </span>
+                            <span v-else class="text-grey">—</span>
+                          </template>
+                          <template #item.pairwise_risk_score_backward="{ item }">
+                            <span v-if="item.pairwise_risk_score_backward != null" :class="pairwiseScoreColor(item.pairwise_risk_score_backward)">
+                              {{ item.pairwise_risk_score_backward.toFixed(3) }}
                             </span>
                             <span v-else class="text-grey">—</span>
                           </template>
@@ -1450,11 +1462,17 @@ const riskScoreLabel = computed(() => {
   return 'リスク(BT)';
 });
 
+const riskScoreKey = computed(() => {
+  if (riskScoreDirection.value === 'forward') return 'pairwise_risk_score_forward';
+  if (riskScoreDirection.value === 'backward') return 'pairwise_risk_score_backward';
+  return 'pairwise_risk_score';
+});
+
 const patientItemHeaders = computed(() => [
   { title: '項目', key: 'item_type_code', width: '110px' },
   { title: '説明', key: 'description' },
   { title: 'リスク(旧)', key: 'risk_score', width: '80px' },
-  { title: riskScoreLabel.value, key: 'pairwise_risk_score', width: '90px' },
+  { title: riskScoreLabel.value, key: riskScoreKey.value, width: '90px' },
   { title: '判定数', key: 'total_judgments', width: '80px' },
   { title: '正答数', key: 'correct_count', width: '80px' },
   { title: '正答率', key: 'accuracy', width: '140px' },
