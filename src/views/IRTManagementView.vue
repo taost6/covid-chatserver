@@ -615,7 +615,20 @@
 
                       <!-- 項目別正答率テーブル -->
                       <v-card variant="outlined" class="mb-4">
-                        <v-card-title class="text-subtitle-1">項目別正答率</v-card-title>
+                        <v-card-title class="text-subtitle-1 d-flex align-center">
+                          項目別正答率
+                          <v-btn-toggle
+                            v-model="riskScoreDirection"
+                            class="ml-4"
+                            density="compact"
+                            mandatory
+                            color="primary"
+                          >
+                            <v-btn value="average" size="small">平均</v-btn>
+                            <v-btn value="forward" size="small">前向き</v-btn>
+                            <v-btn value="backward" size="small">後ろ向き</v-btn>
+                          </v-btn-toggle>
+                        </v-card-title>
                         <v-data-table
                           :headers="patientItemHeaders"
                           :items="patientStats.item_stats"
@@ -655,8 +668,8 @@
                             <span v-else class="text-grey">—</span>
                           </template>
                           <template #item.pairwise_risk_score="{ item }">
-                            <span v-if="item.pairwise_risk_score != null" :class="pairwiseScoreColor(item.pairwise_risk_score)">
-                              {{ item.pairwise_risk_score.toFixed(3) }}
+                            <span v-if="displayedScore(item) != null" :class="pairwiseScoreColor(displayedScore(item)!)">
+                              {{ displayedScore(item)!.toFixed(3) }}
                             </span>
                             <span v-else class="text-grey">—</span>
                           </template>
@@ -1417,22 +1430,36 @@ const patientStats = ref<PatientStatsResponse | null>(null);
 const loadingStats = ref(false);
 const statsLoadedOnce = ref(false);
 
+const riskScoreDirection = ref<'average' | 'forward' | 'backward'>('average');
+
+const displayedScore = (item: any): number | null => {
+  if (riskScoreDirection.value === 'forward') return item.pairwise_risk_score_forward;
+  if (riskScoreDirection.value === 'backward') return item.pairwise_risk_score_backward;
+  return item.pairwise_risk_score;
+};
+
 const pairwiseScoreColor = (score: number): string => {
   if (score >= 0.7) return 'text-red-darken-2 font-weight-bold';
   if (score >= 0.4) return 'text-orange-darken-2';
   return 'text-blue-darken-1';
 };
 
-const patientItemHeaders = [
+const riskScoreLabel = computed(() => {
+  if (riskScoreDirection.value === 'forward') return 'リスク(前)';
+  if (riskScoreDirection.value === 'backward') return 'リスク(後)';
+  return 'リスク(BT)';
+});
+
+const patientItemHeaders = computed(() => [
   { title: '項目', key: 'item_type_code', width: '110px' },
   { title: '説明', key: 'description' },
   { title: 'リスク(旧)', key: 'risk_score', width: '80px' },
-  { title: 'リスク(BT)', key: 'pairwise_risk_score', width: '90px' },
+  { title: riskScoreLabel.value, key: 'pairwise_risk_score', width: '90px' },
   { title: '判定数', key: 'total_judgments', width: '80px' },
   { title: '正答数', key: 'correct_count', width: '80px' },
   { title: '正答率', key: 'accuracy', width: '140px' },
   { title: '', key: 'data-table-expand' },
-];
+]);
 
 const sessionCompareHeaders = [
   { title: 'セッションID', key: 'session_id', width: '200px' },

@@ -33,6 +33,8 @@ export interface IRTPatientInstance {
   is_excluded_from_analysis: boolean;
   risk_score: number | null;
   pairwise_risk_score: number | null;
+  pairwise_risk_score_forward: number | null;
+  pairwise_risk_score_backward: number | null;
   notes: string | null;
   created_at: string;
 }
