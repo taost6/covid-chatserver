@@ -24,8 +24,9 @@
     />
 
     <!-- Navigation Drawer -->
-    <NavigationDrawer 
-      v-model="drawer" 
+    <NavigationDrawer
+      v-model="drawer"
+      :disable-registration="isCBTMode"
       @registration-success="handleRegistrationSuccess"
       @end-session-with-debrief="confirmEndSessionDialog = true"
       @end-session-simple="confirmSimpleEndDialog = true"
@@ -128,6 +129,8 @@ const chatWindow = ref<InstanceType<typeof ChatWindow>>();
 
 // Local state
 const drawer = ref(false);
+// CBT文脈で開かれた場合はロール選択モーダルを抑制する
+const isCBTMode = ref(!!sessionStorage.getItem('cbt_token'));
 const confirmEndSessionDialog = ref(false);
 const confirmSimpleEndDialog = ref(false);
 const confirmInterruptDialog = ref(false);
@@ -221,8 +224,15 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
     debriefingData.value = data;
     sessionStore.setLoadingDebriefing(false); // Stop loading indicator
     sessionStore.setDebriefingExists(true); // Mark debriefing as completed
-    
-    // Redirect to debriefing page instead of showing modal
+
+    // CBTセッションの場合はCBT結果画面へ（リスク加重スコアを算出）
+    const cbtToken = sessionStorage.getItem('cbt_token');
+    if (cbtToken) {
+      router.push({ name: 'cbt-result', params: { token: cbtToken } });
+      return;
+    }
+
+    // 通常セッションは従来の評価画面へ
     router.push({
       name: 'debriefing',
       params: {
@@ -516,16 +526,76 @@ const cleanup = () => {
 };
 
 // Initialization
+// CBT文脈での自動登録（CBTタスク画面から遷移してきた場合）
+const tryCBTAutoRegister = async (): Promise<boolean> => {
+  const cbtToken = sessionStorage.getItem('cbt_token');
+  const cbtPatientId = sessionStorage.getItem('cbt_patient_id');
+  if (!cbtToken || !cbtPatientId) return false;
+
+  // 前のセッションの状態を完全にクリアする（対話履歴・患者情報の混在を防ぐ）
+  localStorage.removeItem('activeSession');
+  sessionStore.reset();
+  chatStore.reset();
+  patientStore.reset();
+
+  try {
+    const result = await api.registerUser({
+      user_name: `cbt:${cbtToken}`,
+      user_role: '保健師',
+      target_patient_id: String(cbtPatientId),
+    });
+    if (result.msg_type === 'RegistrationAccepted') {
+      // CBTセッションIDを記録（CBTタスク画面での完了記録に使用）
+      sessionStorage.setItem('cbt_session_id', result.session_id);
+      await handleRegistrationSuccess({
+        userId: result.user_id,
+        sessionId: result.session_id,
+        userName: `cbt:${cbtToken}`,
+        userRole: '保健師',
+        patientId: String(cbtPatientId),
+      });
+      return true;
+    }
+  } catch (error) {
+    console.error('CBT auto-registration failed:', error);
+  }
+  return false;
+};
+
 onMounted(async () => {
   try {
-    // If no saved session, user needs to register
+    const cbtToken = sessionStorage.getItem('cbt_token');
+    const cbtPatientId = sessionStorage.getItem('cbt_patient_id');
+    const cbtSessionId = sessionStorage.getItem('cbt_session_id');
     const savedSession = localStorage.getItem('activeSession');
-    if (!savedSession) {
-      // セッションがない場合は何もしない（NavigationDrawerが自動でモーダルを表示）
+
+    // CBT文脈がある場合
+    if (cbtToken && cbtPatientId) {
+      // 進行中のCBTセッション（cbt_session_id が保存済みセッションと一致）なら復元
+      if (cbtSessionId && savedSession) {
+        try {
+          const parsed = JSON.parse(savedSession);
+          if (parsed?.sessionId === cbtSessionId) {
+            await restoreSession();
+            return;
+          }
+        } catch {
+          /* パース失敗時は新規登録へフォールスルー */
+        }
+      }
+      // 新規CBTタスク：古いセッションを破棄して保健師ロールで自動登録
+      localStorage.removeItem('activeSession');
+      const cbtRegistered = await tryCBTAutoRegister();
+      if (cbtRegistered) return;
+    }
+
+    // 通常フロー：保存済みセッションがあれば復元
+    if (savedSession) {
+      await restoreSession();
       return;
     }
-    
-    await restoreSession();
+
+    // いずれもなければ何もしない（NavigationDrawerが自動でモーダルを表示）
   } catch (error) {
     console.error('Initialization error:', error);
     // 復元に失敗した場合も何もしない（NavigationDrawerが自動でモーダルを表示）

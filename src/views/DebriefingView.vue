@@ -271,9 +271,21 @@
     <v-footer app class="bg-surface pa-4 no-print">
       <v-container fluid>
         <div class="d-flex justify-center">
-          <v-btn 
-            color="primary" 
-            size="large" 
+          <v-btn
+            v-if="isCBTSession"
+            color="primary"
+            size="large"
+            variant="elevated"
+            @click="returnToCBT"
+            class="px-8"
+          >
+            <v-icon start>mdi-arrow-left</v-icon>
+            CBTトレーニングに戻る
+          </v-btn>
+          <v-btn
+            v-else
+            color="primary"
+            size="large"
             variant="elevated"
             @click="startNewSession"
             class="px-8"
@@ -508,10 +520,27 @@ const loadSessionDataFromApi = async (sessionId: string) => {
 };
 
 
+// CBTセッション判定と復帰処理
+const cbtToken = ref<string | null>(sessionStorage.getItem('cbt_token'));
+const isCBTSession = computed(() => !!cbtToken.value);
+
+const returnToCBT = () => {
+  const token = cbtToken.value;
+  // セッションデータと CBT文脈をクリア
+  localStorage.removeItem('activeSession');
+  sessionStorage.removeItem('cbt_token');
+  sessionStorage.removeItem('cbt_patient_id');
+  sessionStorage.removeItem('cbt_session_id');
+  sessionStore.reset();
+  chatStore.reset();
+  patientStore.reset();
+  router.push({ name: 'cbt-dashboard', params: { token } });
+};
+
 const startNewSession = () => {
   // Clear all session data
   localStorage.removeItem('activeSession');
-  
+
   // Reset all stores to initial state
   sessionStore.reset();
   chatStore.reset();

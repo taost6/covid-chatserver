@@ -12,6 +12,7 @@ from functools import wraps
 from modelSession import Base as SessionBase
 from modelPrompt import Base as PromptBase
 from modelIRT import Base as IRTBase
+from modelCBT import Base as CBTBase
 
 # これらはアプリケーション起動時に initialize_database() によって初期化されます
 engine = None
@@ -130,3 +131,4 @@ def init_db():
     SessionBase.metadata.create_all(bind=engine)
     PromptBase.metadata.create_all(bind=engine)
     IRTBase.metadata.create_all(bind=engine)
+    CBTBase.metadata.create_all(bind=engine)

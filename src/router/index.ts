@@ -35,6 +35,29 @@ const router = createRouter({
       name: 'irt',
       component: () => import('@/views/IRTManagementView.vue'),
     },
+    {
+      path: '/training/admin',
+      name: 'cbt-admin',
+      component: () => import('@/views/CBTAdminView.vue'),
+    },
+    {
+      path: '/training/t/:token',
+      name: 'cbt-dashboard',
+      component: () => import('@/views/CBTDashboardView.vue'),
+      props: true,
+    },
+    {
+      path: '/training/t/:token/task/:patientId',
+      name: 'cbt-task',
+      component: () => import('@/views/CBTTaskView.vue'),
+      props: true,
+    },
+    {
+      path: '/training/t/:token/result',
+      name: 'cbt-result',
+      component: () => import('@/views/CBTResultView.vue'),
+      props: true,
+    },
   ],
 });
 

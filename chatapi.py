@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Body, Request, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict
 from typing import List, Union, Optional, Any
@@ -23,6 +23,7 @@ import modelDatabase
 from modelSession import Session as SessionModel # New
 from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
 from modelIRT import IRTItemType, IRTItemTypeService, IRTPatientInstance, IRTPatientInstanceService, IRTResponseJudgment, IRTResponseJudgmentService
+from modelCBT import CBTAccessToken, CBTProgress, CBTService
 from modelDatabase import db_retry
 from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
@@ -1921,6 +1922,320 @@ def api(config):
         if not stopped:
             raise HTTPException(status_code=404, detail="Batch not found")
         return {"stopped": True}
+
+    # ============================================================
+    # CBT（Computer-Based Testing）プラットフォーム API
+    # ============================================================
+
+    class CBTTaskResponse(BaseModel):
+        progress_id: int
+        patient_id: str
+        session_id: Optional[str]
+        status: str
+        score: Optional[float]
+        ability_theta: Optional[float]
+        ability_se: Optional[float]
+        started_at: Optional[datetime]
+        completed_at: Optional[datetime]
+
+    class CBTTokenInfoResponse(BaseModel):
+        token: str
+        label: Optional[str]
+        is_active: bool
+        completed_count: int
+        active_task: Optional[CBTTaskResponse]
+        progress: List[CBTTaskResponse]
+
+    class CBTTaskStartRequest(BaseModel):
+        patient_id: str
+        session_id: Optional[str] = None
+
+    class CBTTaskFinalizeRequest(BaseModel):
+        session_id: Optional[str] = None
+        score: Optional[float] = None
+        ability_theta: Optional[float] = None
+        ability_se: Optional[float] = None
+
+    def _cbt_task_to_response(p) -> "CBTTaskResponse":
+        return CBTTaskResponse(
+            progress_id=p.id, patient_id=p.patient_id, session_id=p.session_id,
+            status=p.status, score=p.score, ability_theta=p.ability_theta,
+            ability_se=p.ability_se, started_at=p.started_at, completed_at=p.completed_at,
+        )
+
+    def _resolve_cbt_token(token: str, db: Session):
+        """トークン文字列を検証し、有効なトークンレコードを返す。無効なら HTTPException。"""
+        service = CBTService(db)
+        tok = service.get_token(token)
+        if not tok:
+            raise HTTPException(status_code=404, detail="Invalid token")
+        if not tok.is_active:
+            raise HTTPException(status_code=403, detail="This token has been deactivated")
+        return service, tok
+
+    @app.get("/v1/cbt/t/{token}", response_model=CBTTokenInfoResponse)
+    async def cbt_get_token_info(token: str, db: Session = Depends(get_db)):
+        """トークンを検証し、被験者情報と進捗を返す。"""
+        service, tok = _resolve_cbt_token(token, db)
+        service.touch_token(tok.id)
+        progress = service.get_progress(tok.id)
+        active = service.get_active_progress(tok.id)
+        completed = [p for p in progress if p.status == 'completed']
+        return CBTTokenInfoResponse(
+            token=tok.token, label=tok.label, is_active=tok.is_active,
+            completed_count=len(completed),
+            active_task=_cbt_task_to_response(active) if active else None,
+            progress=[_cbt_task_to_response(p) for p in progress],
+        )
+
+    @app.get("/v1/cbt/t/{token}/next-task")
+    async def cbt_get_next_task(token: str, db: Session = Depends(get_db)):
+        """次に取り組むべき患者IDを提示する。
+
+        Phase 1: 暫定的に患者ID昇順で、未完了の最初の患者を返す。
+        Phase 2: IRT推定値による CAT（Fisher情報量最大化）に差し替える。
+        """
+        service, tok = _resolve_cbt_token(token, db)
+        progress = service.get_progress(tok.id)
+        done_patients = {p.patient_id for p in progress if p.status == 'completed'}
+
+        available = role_provider.get_available_patient_ids()
+        # 患者ID昇順（数値として）でソート
+        def _as_int(x):
+            try:
+                return int(x)
+            except (ValueError, TypeError):
+                return 10 ** 9
+        available_sorted = sorted(available, key=_as_int)
+
+        next_patient = next((p for p in available_sorted if p not in done_patients), None)
+        return {
+            "next_patient_id": next_patient,
+            "all_completed": next_patient is None,
+            "completed_count": len(done_patients),
+            "total_count": len(available_sorted),
+        }
+
+    @app.post("/v1/cbt/t/{token}/tasks/start", response_model=CBTTaskResponse)
+    async def cbt_start_task(token: str, req: CBTTaskStartRequest, db: Session = Depends(get_db)):
+        """課題を開始状態で記録する。進行中の課題が既にあればそれを返す。"""
+        service, tok = _resolve_cbt_token(token, db)
+        active = service.get_active_progress(tok.id)
+        if active:
+            return _cbt_task_to_response(active)
+        prog = service.start_progress(tok.id, req.patient_id, req.session_id)
+        return _cbt_task_to_response(prog)
+
+    @app.post("/v1/cbt/t/{token}/tasks/{progress_id}/finalize", response_model=CBTTaskResponse)
+    async def cbt_finalize_task(token: str, progress_id: int,
+                                req: CBTTaskFinalizeRequest, db: Session = Depends(get_db)):
+        """課題を完了状態にし、得点・能力推定値を記録する。"""
+        service, tok = _resolve_cbt_token(token, db)
+        prog = service.finalize_progress(
+            progress_id, score=req.score,
+            ability_theta=req.ability_theta, ability_se=req.ability_se,
+            session_id=req.session_id,
+        )
+        if not prog or prog.token_id != tok.id:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return _cbt_task_to_response(prog)
+
+    class CBTResultItem(BaseModel):
+        instance_id: int
+        item_type_code: str
+        description: Optional[str]
+        risk_score: Optional[float]
+        collected: bool
+
+    class CBTResultResponse(BaseModel):
+        progress_id: int
+        patient_id: str
+        score: float                    # 項目聴取率（0〜1）
+        total_item_count: int
+        collected_item_count: int
+        items: List[CBTResultItem]       # 全項目（リスク降順）
+
+    async def _compute_cbt_score(session_id: str, db: Session):
+        """セッションのIRT判定を実行（または取得）し、項目聴取率を算出する。
+
+        スコアは単純な聴取率（聴取できた項目数 ÷ 全項目数）。
+        リスクスコアはスコアの重みには用いず、結果表示の参考情報としてのみ含める。
+        """
+        # 既存判定があれば再利用、無ければ判定実行
+        judgment_service = IRTResponseJudgmentService(db)
+        judgments = judgment_service.get_judgments_for_session(session_id)
+        if not judgments:
+            judgments = await _execute_irt_judgment(session_id, db)
+
+        session_record = db.query(SessionModel).filter(
+            SessionModel.session_id == session_id
+        ).first()
+        if not session_record or not session_record.patient_id:
+            raise HTTPException(status_code=400, detail="Session has no patient_id")
+        patient_id = session_record.patient_id
+
+        instance_service = IRTPatientInstanceService(db)
+        instances = instance_service.get_instances_for_patient(patient_id)
+        detectable = [i for i in instances if i.is_detectable]
+        if not detectable:
+            raise HTTPException(status_code=400, detail="No detectable instances for this patient")
+
+        judged = {j.instance_id: j.is_correct for j in judgments}
+
+        result_items = []
+        collected_count = 0
+        for inst in detectable:
+            is_collected = bool(judged.get(inst.id, False))
+            if is_collected:
+                collected_count += 1
+            result_items.append(CBTResultItem(
+                instance_id=inst.id, item_type_code=inst.item_type_code,
+                description=inst.description, risk_score=inst.pairwise_risk_score,
+                collected=is_collected,
+            ))
+
+        total = len(detectable)
+        score = collected_count / total if total > 0 else 0.0
+        # リスク降順でソート（参考情報として高リスク項目を上位に）
+        result_items.sort(key=lambda x: (x.risk_score is None, -(x.risk_score or 0)))
+
+        return {
+            "patient_id": patient_id,
+            "score": score,
+            "total_item_count": total,
+            "collected_item_count": collected_count,
+            "items": result_items,
+        }
+
+    @app.post("/v1/cbt/t/{token}/tasks/{progress_id}/score", response_model=CBTResultResponse)
+    async def cbt_score_task(token: str, progress_id: int,
+                             req: CBTTaskFinalizeRequest, db: Session = Depends(get_db)):
+        """セッションのIRT判定からリスク加重スコアを算出し、課題を完了記録する。"""
+        service, tok = _resolve_cbt_token(token, db)
+        progress = service.get_progress(tok.id)
+        prog = next((p for p in progress if p.id == progress_id), None)
+        if not prog:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        session_id = req.session_id or prog.session_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No session_id for this task")
+
+        result = await _compute_cbt_score(session_id, db)
+        service.finalize_progress(
+            progress_id, score=result["score"],
+            ability_theta=None, ability_se=None, session_id=session_id,
+        )
+        return CBTResultResponse(progress_id=progress_id, **result)
+
+    # --- CBT 管理者 API ---
+
+    def _check_cbt_admin(request: Request):
+        """管理者APIのアクセス制御。環境変数 CBT_ADMIN_KEY が設定されていれば
+        X-Admin-Key ヘッダーとの一致を要求する。未設定時は開発用に許可する。"""
+        admin_key = os.environ.get("CBT_ADMIN_KEY")
+        if not admin_key:
+            logger.warning("CBT_ADMIN_KEY is not set; admin endpoints are unprotected.")
+            return
+        provided = request.headers.get("X-Admin-Key")
+        if provided != admin_key:
+            raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    class CBTTokenIssueRequest(BaseModel):
+        count: int
+        labels: Optional[List[str]] = None
+
+    class CBTAdminTokenResponse(BaseModel):
+        id: int
+        token: str
+        label: Optional[str]
+        is_active: bool
+        created_at: Optional[datetime]
+        last_seen_at: Optional[datetime]
+        completed_count: int
+        total_count: int
+
+    def _cbt_admin_token_response(tok, progress_list) -> "CBTAdminTokenResponse":
+        completed = [p for p in progress_list if p.status == 'completed']
+        return CBTAdminTokenResponse(
+            id=tok.id, token=tok.token, label=tok.label, is_active=tok.is_active,
+            created_at=tok.created_at, last_seen_at=tok.last_seen_at,
+            completed_count=len(completed), total_count=len(progress_list),
+        )
+
+    @app.post("/v1/cbt/admin/tokens")
+    async def cbt_admin_issue_tokens(req: CBTTokenIssueRequest, request: Request,
+                                     db: Session = Depends(get_db)):
+        """アクセストークン（URL）を一括発行する。"""
+        _check_cbt_admin(request)
+        if req.count < 1 or req.count > 500:
+            raise HTTPException(status_code=400, detail="count must be between 1 and 500")
+        service = CBTService(db)
+        tokens = service.create_tokens(req.count, req.labels)
+        return [
+            _cbt_admin_token_response(t, [])
+            for t in tokens
+        ]
+
+    @app.get("/v1/cbt/admin/tokens")
+    async def cbt_admin_list_tokens(request: Request, db: Session = Depends(get_db)):
+        """全トークンを進捗サマリ付きで取得する。"""
+        _check_cbt_admin(request)
+        service = CBTService(db)
+        tokens = service.list_tokens()
+        result = []
+        for tok in tokens:
+            progress = service.get_progress(tok.id)
+            result.append(_cbt_admin_token_response(tok, progress))
+        return result
+
+    @app.post("/v1/cbt/admin/tokens/{token_id}/deactivate")
+    async def cbt_admin_deactivate_token(token_id: int, request: Request,
+                                         db: Session = Depends(get_db)):
+        """トークンを無効化する。"""
+        _check_cbt_admin(request)
+        service = CBTService(db)
+        ok = service.deactivate_token(token_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Token not found")
+        return {"deactivated": True}
+
+    class CBTTokenUpdateRequest(BaseModel):
+        label: Optional[str] = None
+
+    @app.patch("/v1/cbt/admin/tokens/{token_id}")
+    async def cbt_admin_update_token(token_id: int, req: CBTTokenUpdateRequest,
+                                     request: Request, db: Session = Depends(get_db)):
+        """トークンのラベルを更新する。"""
+        _check_cbt_admin(request)
+        service = CBTService(db)
+        tok = service.update_label(token_id, req.label)
+        if not tok:
+            raise HTTPException(status_code=404, detail="Token not found")
+        progress = service.get_progress(tok.id)
+        return _cbt_admin_token_response(tok, progress)
+
+    @app.get("/v1/cbt/admin/tokens/export.csv")
+    async def cbt_admin_export_csv(request: Request, db: Session = Depends(get_db)):
+        """全トークンと進捗サマリを CSV でエクスポートする（スプレッドシート連携用）。"""
+        _check_cbt_admin(request)
+        service = CBTService(db)
+        tokens = service.list_tokens()
+        lines = ["token_id,token,label,is_active,completed_count,total_count,created_at,last_seen_at"]
+        for tok in tokens:
+            progress = service.get_progress(tok.id)
+            completed = len([p for p in progress if p.status == 'completed'])
+            label = (tok.label or "").replace(",", " ").replace("\n", " ")
+            lines.append(
+                f"{tok.id},{tok.token},{label},{tok.is_active},"
+                f"{completed},{len(progress)},{tok.created_at or ''},{tok.last_seen_at or ''}"
+            )
+        csv_content = "﻿" + "\n".join(lines)  # BOM付きでExcel互換
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=cbt_tokens.csv"},
+        )
 
     @app.post("/v1")
     async def post_request(req: RegistrationRequest, db: Session = Depends(get_db)):
