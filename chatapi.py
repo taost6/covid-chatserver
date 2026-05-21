@@ -2215,6 +2215,43 @@ def api(config):
         progress = service.get_progress(tok.id)
         return _cbt_admin_token_response(tok, progress)
 
+    class CBTTokenDetailResponse(BaseModel):
+        id: int
+        token: str
+        label: Optional[str]
+        is_active: bool
+        created_at: Optional[datetime]
+        last_seen_at: Optional[datetime]
+        completed_count: int
+        total_count: int
+        average_score: Optional[float]      # 完了済みタスクのスコア平均（0〜1）
+        progress: List[CBTTaskResponse]      # 各課題の詳細
+
+    @app.get("/v1/cbt/admin/tokens/{token_id}/detail", response_model=CBTTokenDetailResponse)
+    async def cbt_admin_token_detail(token_id: int, request: Request,
+                                     db: Session = Depends(get_db)):
+        """トークンの詳細情報（進捗履歴を含む）を取得する。"""
+        _check_cbt_admin(request)
+        service = CBTService(db)
+        tok = (
+            db.query(CBTAccessToken)
+            .filter(CBTAccessToken.id == token_id)
+            .first()
+        )
+        if not tok:
+            raise HTTPException(status_code=404, detail="Token not found")
+        progress = service.get_progress(tok.id)
+        completed = [p for p in progress if p.status == 'completed']
+        scores = [p.score for p in completed if p.score is not None]
+        avg_score = sum(scores) / len(scores) if scores else None
+        return CBTTokenDetailResponse(
+            id=tok.id, token=tok.token, label=tok.label, is_active=tok.is_active,
+            created_at=tok.created_at, last_seen_at=tok.last_seen_at,
+            completed_count=len(completed), total_count=len(progress),
+            average_score=avg_score,
+            progress=[_cbt_task_to_response(p) for p in progress],
+        )
+
     @app.get("/v1/cbt/admin/tokens/export.csv")
     async def cbt_admin_export_csv(request: Request, db: Session = Depends(get_db)):
         """全トークンと進捗サマリを CSV でエクスポートする（スプレッドシート連携用）。"""

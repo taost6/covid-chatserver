@@ -56,6 +56,11 @@ export interface CBTAdminToken {
   total_count: number;
 }
 
+export interface CBTAdminTokenDetail extends CBTAdminToken {
+  average_score: number | null;
+  progress: CBTTask[];
+}
+
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -157,6 +162,13 @@ export const cbtApi = {
       headers: adminHeaders(adminKey),
       body: JSON.stringify({ label }),
     });
+  },
+
+  async getTokenDetail(adminKey: string, tokenId: number): Promise<CBTAdminTokenDetail> {
+    return request<CBTAdminTokenDetail>(
+      `${baseUrl()}/v1/cbt/admin/tokens/${tokenId}/detail`,
+      { headers: adminHeaders(adminKey) },
+    );
   },
 
   exportCsvUrl(): string {
