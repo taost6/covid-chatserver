@@ -5,6 +5,7 @@ IRT バッチ実行エンジン
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Any
 
@@ -237,6 +238,8 @@ class IRTBatchRunner:
         self.oaw = oaw
         self.role_provider = role_provider
         self.batches: Dict[str, dict] = {}  # batch_id -> state
+        self.conversation_timeout_seconds = int(os.getenv("IRT_CONVERSATION_TIMEOUT_SECONDS", "1800"))
+        self.judgment_timeout_seconds = int(os.getenv("IRT_JUDGMENT_TIMEOUT_SECONDS", "1200"))
 
     async def start_batch(self, patient_ids: List[str], runs_per_patient: int, concurrency: int,
                           nurse_model: Optional[str] = None, patient_model: Optional[str] = None,
@@ -269,7 +272,38 @@ class IRTBatchRunner:
         state["task"] = asyncio.create_task(
             self._run_batch(batch_id, patient_ids, runs_per_patient, concurrency)
         )
+        state["task"].add_done_callback(lambda task: self._finalize_batch_task(batch_id, task))
         return batch_id
+
+    def _mark_running_entries(self, state: dict, status: str, error: str):
+        for entry in state["results"]:
+            if entry.get("status") == "running":
+                entry["status"] = status
+                entry["error"] = error
+                entry["phase"] = entry.get("phase") or "unknown"
+        state["running"] = 0
+
+    def _finalize_batch_task(self, batch_id: str, task: asyncio.Task):
+        state = self.batches.get(batch_id)
+        if not state:
+            return
+        if state["status"] in ("completed", "stopped", "failed"):
+            return
+
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            state["status"] = "stopped"
+            self._mark_running_entries(state, "cancelled", "Batch task was cancelled")
+            return
+
+        if exc:
+            state["status"] = "failed"
+            self._mark_running_entries(state, "failed", f"Batch task crashed: {exc}")
+            logger.error(
+                f"[Batch {batch_id}] Batch task crashed: {exc}",
+                exc_info=(type(exc), exc, exc.__traceback__)
+            )
 
     async def _run_batch(self, batch_id: str, patient_ids: List[str], runs_per_patient: int, concurrency: int):
         state = self.batches[batch_id]
@@ -289,6 +323,7 @@ class IRTBatchRunner:
                     "patient_id": patient_id,
                     "run_number": run_number,
                     "status": "running",
+                    "phase": "queued",
                     "correct_count": None,
                     "total_count": None,
                     "error": None,
@@ -297,7 +332,9 @@ class IRTBatchRunner:
                 state["running"] += 1
 
                 db = None
+                db_session = None
                 try:
+                    result_entry["phase"] = "initializing"
                     db = modelDatabase.SessionLocal()
 
                     # セッションレコード作成
@@ -332,6 +369,7 @@ class IRTBatchRunner:
                     db.commit()
 
                     # ヘッドレス対話実行
+                    result_entry["phase"] = "conversation"
                     conv = HeadlessConversation(
                         self.oaw, self.role_provider, db,
                         nurse_model=state["nurse_model"],
@@ -339,9 +377,13 @@ class IRTBatchRunner:
                         patient_prompt_version=p_ver,
                         interviewer_prompt_version=i_ver,
                     )
-                    conv_result = await conv.run(patient_id, session_id)
+                    conv_result = await asyncio.wait_for(
+                        conv.run(patient_id, session_id),
+                        timeout=self.conversation_timeout_seconds
+                    )
 
                     # セッション完了
+                    result_entry["phase"] = "conversation_completed"
                     db_session.status = 'completed'
                     db_session.completed_at = datetime.now(JST)
                     if conv_result.get("interview_date"):
@@ -349,12 +391,17 @@ class IRTBatchRunner:
                     db.commit()
 
                     # IRT判定実行
-                    judgment_result = await self._execute_irt_judgment_for_batch(
-                        session_id, db, evaluator_model=state["evaluator_model"],
-                        evaluator_prompt_version=state.get("evaluator_prompt_version")
+                    result_entry["phase"] = "judgment"
+                    judgment_result = await asyncio.wait_for(
+                        self._execute_irt_judgment_for_batch(
+                            session_id, db, evaluator_model=state["evaluator_model"],
+                            evaluator_prompt_version=state.get("evaluator_prompt_version")
+                        ),
+                        timeout=self.judgment_timeout_seconds
                     )
 
                     result_entry["status"] = "completed"
+                    result_entry["phase"] = "completed"
                     result_entry["correct_count"] = judgment_result.get("correct_count", 0)
                     result_entry["total_count"] = judgment_result.get("total_count", 0)
                     state["completed"] += 1
@@ -366,6 +413,30 @@ class IRTBatchRunner:
                         f"correct={result_entry['correct_count']}/{result_entry['total_count']}"
                     )
 
+                except asyncio.CancelledError:
+                    result_entry["status"] = "cancelled"
+                    result_entry["error"] = "Batch was cancelled"
+                    logger.info(f"[Batch {batch_id}] Cancelled: patient={patient_id} run={run_number} session={session_id}")
+                    raise
+                except asyncio.TimeoutError:
+                    error = (
+                        f"Timeout during {result_entry.get('phase')} "
+                        f"(conversation_timeout={self.conversation_timeout_seconds}s, "
+                        f"judgment_timeout={self.judgment_timeout_seconds}s)"
+                    )
+                    logger.error(f"[Batch {batch_id}] {error}: patient={patient_id} run={run_number} session={session_id}")
+                    result_entry["status"] = "failed"
+                    result_entry["error"] = error
+                    state["failed"] += 1
+                    if db:
+                        db.rollback()
+                        if db_session:
+                            try:
+                                db_session.status = 'failed'
+                                db_session.completed_at = datetime.now(JST)
+                                db.commit()
+                            except Exception:
+                                db.rollback()
                 except Exception as e:
                     logger.error(f"[Batch {batch_id}] Failed: patient={patient_id} run={run_number}: {e}")
                     result_entry["status"] = "failed"
@@ -373,8 +444,15 @@ class IRTBatchRunner:
                     state["failed"] += 1
                     if db:
                         db.rollback()
+                        if db_session:
+                            try:
+                                db_session.status = 'failed'
+                                db_session.completed_at = datetime.now(JST)
+                                db.commit()
+                            except Exception:
+                                db.rollback()
                 finally:
-                    state["running"] -= 1
+                    state["running"] = max(0, state["running"] - 1)
                     if db:
                         db.close()
 
@@ -382,9 +460,19 @@ class IRTBatchRunner:
         tasks = []
         for pid in patient_ids:
             for run_num in range(1, runs_per_patient + 1):
-                tasks.append(run_one(pid, run_num))
+                tasks.append(asyncio.create_task(run_one(pid, run_num)))
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            state["cancel_event"].set()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._mark_running_entries(state, "cancelled", "Batch was cancelled")
+            state["status"] = "stopped"
+            logger.info(f"[Batch {batch_id}] Stopped by cancellation")
+            return
 
         if state["cancel_event"].is_set():
             state["status"] = "stopped"
