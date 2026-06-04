@@ -237,7 +237,7 @@ const headers = [
 ];
 
 const trainingUrl = (token: string): string => {
-  return `${window.location.origin}/training/t/${token}`;
+  return `${window.location.origin}/cbt/t/${token}`;
 };
 
 const formatDate = (iso: string): string => {

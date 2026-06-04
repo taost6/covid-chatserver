@@ -546,8 +546,8 @@ const startNewSession = () => {
   chatStore.reset();
   patientStore.reset();
   
-  // Navigate to home page
-  router.push('/');
+  // Navigate to free training mode
+  router.push({ name: 'chat' });
 };
 
 

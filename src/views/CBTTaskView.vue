@@ -46,6 +46,6 @@ const openChat = () => {
   // CBT文脈を保存し、対話画面へ。ChatViewが保健師ロール・該当患者で自動登録する。
   sessionStorage.setItem('cbt_token', token.value);
   sessionStorage.setItem('cbt_patient_id', patientId.value);
-  router.push({ path: '/' });
+  router.push({ name: 'chat' });
 };
 </script>

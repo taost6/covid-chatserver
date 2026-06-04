@@ -14,7 +14,7 @@
     <!-- 本体 -->
     <template v-else-if="info">
       <div class="d-flex align-center mb-2">
-        <h1 class="text-h5 font-weight-bold">CBT トレーニング</h1>
+        <h1 class="text-h5 font-weight-bold">疫学調査シミュレータ―（CBTモード）</h1>
         <v-chip v-if="info.label" class="ml-3" size="small" color="primary" variant="tonal">
           {{ info.label }}
         </v-chip>

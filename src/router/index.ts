@@ -5,6 +5,11 @@ const router = createRouter({
   routes: [
     {
       path: '/',
+      name: 'home',
+      component: () => import('@/views/LandingView.vue'),
+    },
+    {
+      path: '/training',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),
     },
@@ -36,27 +41,43 @@ const router = createRouter({
       component: () => import('@/views/IRTManagementView.vue'),
     },
     {
-      path: '/training/admin',
+      path: '/cbt/admin',
       name: 'cbt-admin',
       component: () => import('@/views/CBTAdminView.vue'),
     },
     {
-      path: '/training/t/:token',
+      path: '/cbt/t/:token',
       name: 'cbt-dashboard',
       component: () => import('@/views/CBTDashboardView.vue'),
       props: true,
     },
     {
-      path: '/training/t/:token/task/:patientId',
+      path: '/cbt/t/:token/task/:patientId',
       name: 'cbt-task',
       component: () => import('@/views/CBTTaskView.vue'),
       props: true,
     },
     {
-      path: '/training/t/:token/result',
+      path: '/cbt/t/:token/result',
       name: 'cbt-result',
       component: () => import('@/views/CBTResultView.vue'),
       props: true,
+    },
+    {
+      path: '/training/admin',
+      redirect: { name: 'cbt-admin' },
+    },
+    {
+      path: '/training/t/:token',
+      redirect: to => ({ name: 'cbt-dashboard', params: to.params }),
+    },
+    {
+      path: '/training/t/:token/task/:patientId',
+      redirect: to => ({ name: 'cbt-task', params: to.params }),
+    },
+    {
+      path: '/training/t/:token/result',
+      redirect: to => ({ name: 'cbt-result', params: to.params }),
     },
   ],
 });
