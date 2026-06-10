@@ -71,6 +71,11 @@ class IRTResponseJudgment(Base):
     evidence_message_ids = Column(Text, nullable=True)  # JSON array of chat_log IDs
     notes = Column(Text, nullable=True)
     judged_at = Column(DateTime(timezone=True), server_default=func.now())
+    # 来歴（プロヴェナンス）: 判定条件をデータから検証可能にする
+    evaluator_model = Column(String(50), nullable=True)          # 判定に使用したLLMモデル名
+    evaluator_prompt_version = Column(Integer, nullable=True)    # 判定に使用した評価者プロンプトのバージョン
+    votes_total = Column(Integer, nullable=True)                 # 多数決の投票数（単発判定は1）
+    votes_correct = Column(Integer, nullable=True)               # 「正答」と判定した票数
 
 
 class IRTItemTypeService:

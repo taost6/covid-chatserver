@@ -351,6 +351,13 @@ class IRTBatchRunner:
                         interviewer_tmpl = prompt_service.get_template_by_version('interviewer', i_ver)
                     else:
                         interviewer_tmpl = prompt_service.get_active_template('interviewer')
+                    # 評価者プロンプトもこの時点で解決し、セッションに記録・判定にも固定する
+                    e_ver = state.get("evaluator_prompt_version")
+                    if e_ver is not None:
+                        evaluator_tmpl = prompt_service.get_template_by_version('evaluator', e_ver)
+                    else:
+                        evaluator_tmpl = prompt_service.get_active_template('evaluator')
+                    resolved_evaluator_version = evaluator_tmpl.version if evaluator_tmpl else None
                     prompt_db.close()
 
                     db_session = SessionModel(
@@ -361,6 +368,7 @@ class IRTBatchRunner:
                         status='active',
                         patient_version=patient_tmpl.version if patient_tmpl else None,
                         interviewer_version=interviewer_tmpl.version if interviewer_tmpl else None,
+                        evaluator_version=resolved_evaluator_version,
                         patient_model=state["patient_model"],
                         interviewer_model=state["nurse_model"],
                         evaluator_model=state["evaluator_model"],
@@ -395,7 +403,7 @@ class IRTBatchRunner:
                     judgment_result = await asyncio.wait_for(
                         self._execute_irt_judgment_for_batch(
                             session_id, db, evaluator_model=state["evaluator_model"],
-                            evaluator_prompt_version=state.get("evaluator_prompt_version")
+                            evaluator_prompt_version=resolved_evaluator_version
                         ),
                         timeout=self.judgment_timeout_seconds
                     )
@@ -542,6 +550,7 @@ class IRTBatchRunner:
         if not irt_eval_template:
             raise RuntimeError("評価者プロンプトがDBに登録されていません。プロンプト管理画面から登録してください。")
 
+        used_evaluator_prompt_version = irt_eval_template.version
         base_prompt = irt_eval_template.prompt_text
 
         full_prompt = (
@@ -632,6 +641,10 @@ class IRTBatchRunner:
                 "judgment_method": "ai",
                 "confidence": j.get("confidence"),
                 "notes": j.get("reasoning"),
+                "evaluator_model": evaluator_model,
+                "evaluator_prompt_version": used_evaluator_prompt_version,
+                "votes_total": 1,
+                "votes_correct": 1 if j["is_correct"] else 0,
             })
 
         saved = judgment_service.bulk_create_judgments(db_judgments)

@@ -1697,6 +1697,13 @@ def api(config):
             logger.info(f"Deleted {deleted} existing judgments for session {session_id}")
 
         # 8. 判定結果をDBに保存
+        # 来歴記録: 使用したモデル（アシスタントのデフォルト）とプロンプトバージョン
+        try:
+            judgment_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
+        except Exception as e:
+            logger.warning(f"Failed to resolve evaluator model for provenance: {e}")
+            judgment_model = None
+
         valid_instance_ids = {inst.id for inst in detectable_instances}
         db_judgments = []
         for j in llm_judgments:
@@ -1710,6 +1717,10 @@ def api(config):
                 "judgment_method": "ai",
                 "confidence": j.get("confidence"),
                 "notes": j.get("reasoning"),
+                "evaluator_model": judgment_model,
+                "evaluator_prompt_version": irt_eval_template.version,
+                "votes_total": 1,
+                "votes_correct": 1 if j["is_correct"] else 0,
             })
 
         saved = judgment_service.bulk_create_judgments(db_judgments)
