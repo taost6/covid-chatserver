@@ -1774,8 +1774,14 @@ def api(config):
         ]
 
     @app.get("/v1/irt/judgments/patient/{patient_id}")
-    async def get_irt_patient_stats(patient_id: str, db: Session = Depends(get_db)):
-        """患者ID別のIRT判定統計を取得"""
+    async def get_irt_patient_stats(patient_id: str, include_all: bool = False,
+                                    db: Session = Depends(get_db)):
+        """患者ID別のIRT判定統計を取得
+
+        デフォルトでは分析対象セッション（IRT_Batch・completed・正準モデル/プロンプト版）の
+        判定のみを集計する。surplus除外セッションや旧試行セッションの判定が混ざると
+        項目ごとの判定数が不揃いに見えるため。include_all=true で全判定を集計（旧挙動）。
+        """
         from collections import defaultdict
 
         inst_service = IRTPatientInstanceService(db)
@@ -1788,8 +1794,27 @@ def api(config):
 
         instance_ids = [inst.id for inst in instances]
 
-        judg_service = IRTResponseJudgmentService(db)
-        all_judgments = judg_service.get_judgments_by_instance_ids(instance_ids)
+        if include_all:
+            judg_service = IRTResponseJudgmentService(db)
+            all_judgments = judg_service.get_judgments_by_instance_ids(instance_ids)
+        else:
+            all_judgments = (
+                db.query(IRTResponseJudgment)
+                .join(SessionModel,
+                      SessionModel.session_id == IRTResponseJudgment.session_id)
+                .filter(
+                    IRTResponseJudgment.instance_id.in_(instance_ids),
+                    SessionModel.status == 'completed',
+                    SessionModel.user_name == 'IRT_Batch',
+                    SessionModel.patient_model == 'gpt-4.1',
+                    SessionModel.evaluator_model == 'gpt-5.4',
+                    SessionModel.interviewer_model.in_(('gpt-4.1', 'gpt-5.2', 'gpt-5.5')),
+                    SessionModel.interviewer_version.between(10, 14),
+                )
+                .order_by(IRTResponseJudgment.instance_id,
+                          IRTResponseJudgment.session_id)
+                .all()
+            )
 
         # グルーピング
         judgments_by_instance = defaultdict(list)
