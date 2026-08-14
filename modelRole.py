@@ -7,6 +7,7 @@ from googleapiclient.errors import HttpError
 import io
 import os
 import json
+import re
 from datetime import datetime, timedelta
 import random
 import argparse
@@ -102,16 +103,16 @@ class PatientRoleProvider:
     def _get_column_indices(self):
         return {col: self.df.columns.tolist().index(col) if col in self.df.columns else -1 for col in self.target_columns}
 
-    def _determine_interview_date(self, onset_date_str: str) -> (datetime, str):
-        """発症日に基づいて調査日と時間帯を確率的に決定する"""
+    def _determine_interview_date(self, base_date_str: str) -> (datetime, str):
+        """基準日（原則として診断日）に基づいて調査日と時間帯を確率的に決定する"""
         onset_date = None
-        # onset_date_strが文字列でない場合やNone、空文字列の場合のチェック
-        if not onset_date_str or onset_date_str == "不明" or pd.isna(onset_date_str):
+        # base_date_strが文字列でない場合やNone、空文字列の場合のチェック
+        if not base_date_str or base_date_str == "不明" or pd.isna(base_date_str):
             onset_date = datetime(2022, 4, 30)  # デフォルト日付
         else:
             try:
                 # 文字列から日付への変換を試みる
-                onset_date = pd.to_datetime(onset_date_str)
+                onset_date = pd.to_datetime(base_date_str)
                 # 変換結果がNaT（Not a Time）の場合も考慮
                 if pd.isna(onset_date):
                     onset_date = datetime(2022, 4, 30)
@@ -184,16 +185,24 @@ class PatientRoleProvider:
         # 調査日を決定
         interview_date = None
         if not interview_date_str:
-            # 基準日を 発症日 > 感染日 > 固定日 の優先順位で決定
+            # 基準日を 診断日（開示情報から抽出） > 発症日 > 感染日 > 固定日 の優先順位で決定
+            # 実際の疫学調査は診断（陽性判明）後に行われるため、診断日を第一基準とする。
+            # 無症状例（発症日なし）でも診断日は必ず存在するため、時系列矛盾も防げる。
             base_date_str = None
+            disclosed_idx = column_indices.get("調査開始時点で開示されている情報", -1)
             onsetDate_idx = column_indices.get("発症日", -1)
             infectionDate_idx = column_indices.get("感染日", -1)
 
-            if onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]):
+            if disclosed_idx != -1 and pd.notna(row[disclosed_idx]):
+                m = re.search(r"診断日[:：]\s*([0-9]{4}-[0-9]{1,2}-[0-9]{1,2})",
+                              str(row[disclosed_idx]))
+                if m:
+                    base_date_str = m.group(1)
+            if base_date_str is None and onsetDate_idx != -1 and pd.notna(row[onsetDate_idx]):
                 base_date_str = row[onsetDate_idx]
-            elif infectionDate_idx != -1 and pd.notna(row[infectionDate_idx]):
+            if base_date_str is None and infectionDate_idx != -1 and pd.notna(row[infectionDate_idx]):
                 base_date_str = row[infectionDate_idx]
-            else:
+            if base_date_str is None:
                 base_date_str = "2022-04-30"
 
             interview_date, time_of_day = self._determine_interview_date(base_date_str)
