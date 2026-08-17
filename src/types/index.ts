@@ -109,7 +109,7 @@ export interface SessionRestoreResponse {
 }
 
 // プロンプト管理関連の型定義
-export type PromptTemplateType = 'patient' | 'interviewer' | 'evaluator';
+export type PromptTemplateType = 'patient' | 'interviewer' | 'evaluator' | 'debriefing';
 
 export interface PromptTemplate {
   id: number;

@@ -683,9 +683,14 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
     try:
         prompt_db = modelDatabase.PromptSessionLocal()
         prompt_service = PromptTemplateService(prompt_db)
-        evaluator_template = prompt_service.get_active_template('evaluator')
+        # 旧評価系（総評・デブリーフィング）は 'debriefing' 種別を参照する。
+        # 'evaluator' 種別はIRT判定基準用に転用されたため（v10以降）、ここでは使わない。
+        # debriefing 種別が未登録の環境では、分離前の evaluator v9 にフォールバックする。
+        evaluator_template = prompt_service.get_active_template('debriefing')
+        if not evaluator_template:
+            evaluator_template = prompt_service.get_template_by_version('evaluator', 9)
         prompt_db.close()
-        
+
         if evaluator_template:
             base_prompt = evaluator_template.prompt_text
             # logger.info(f"[DEBRIEFING DEBUG] Using evaluator template from DB (version: {evaluator_template.version})")
@@ -1258,7 +1263,7 @@ def api(config):
     async def create_prompt(req: PromptTemplateRequest, db: Session = Depends(get_db_for_prompts)):
         """新しいプロンプトテンプレートを作成"""
         # バリデーション
-        if req.template_type not in ['patient', 'interviewer', 'evaluator']:
+        if req.template_type not in ['patient', 'interviewer', 'evaluator', 'debriefing']:
             raise HTTPException(status_code=400, detail="Invalid template_type")
         
         service = PromptTemplateService(db)
@@ -1705,11 +1710,17 @@ def api(config):
             judgment_model = None
 
         valid_instance_ids = {inst.id for inst in detectable_instances}
+        # LLMが同一instance_idに複数の判定を返すことがあるため、最初の判定のみ採用する
+        seen_instance_ids = set()
         db_judgments = []
         for j in llm_judgments:
             if j.get("instance_id") not in valid_instance_ids:
                 logger.warning(f"Skipping unknown instance_id: {j.get('instance_id')}")
                 continue
+            if j["instance_id"] in seen_instance_ids:
+                logger.warning(f"Skipping duplicate judgment for instance_id: {j['instance_id']}")
+                continue
+            seen_instance_ids.add(j["instance_id"])
             db_judgments.append({
                 "session_id": session_id,
                 "instance_id": j["instance_id"],
@@ -1727,6 +1738,35 @@ def api(config):
         logger.info(f"Saved {len(saved)} IRT judgments for session {session_id}")
 
         return saved
+
+    def _schedule_irt_judgment_for_human_session(session_id: str, user_role: str, logger):
+        """自由選択モードの保健師（人間）セッション完了時にIRT判定を非同期で実行する。
+
+        - 判定には 'evaluator' 種別のアクティブプロンプト（IRT判定基準）を使用
+        - 既に判定が存在するセッションは再判定しない（評価付き終了→終了の二重起動対策）
+        - 失敗してもセッション終了処理は妨げない（ログのみ）
+        """
+        if user_role != "保健師":
+            return
+
+        async def _run():
+            db2 = modelDatabase.SessionLocal()
+            try:
+                srec = db2.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+                if not srec or not srec.patient_id:
+                    return
+                judgment_service = IRTResponseJudgmentService(db2)
+                if judgment_service.get_judgments_for_session(session_id):
+                    logger.info(f"IRT judgments already exist for session {session_id}; skipping")
+                    return
+                await _execute_irt_judgment(session_id, db2)
+                logger.info(f"IRT judgment completed for human session {session_id}")
+            except Exception as e:
+                logger.error(f"IRT judgment for human session {session_id} failed: {e}")
+            finally:
+                db2.close()
+
+        asyncio.create_task(_run())
 
     @app.post("/v1/irt/judgments/evaluate/{session_id}")
     async def evaluate_irt_judgments(session_id: str, db: Session = Depends(get_db)):
@@ -2920,8 +2960,11 @@ def api(config):
                     if user.role == "傍聴者" and session.ai_conversation_manager:
                         await session.ai_conversation_manager.stop_conversation()
                         logger.info(f"AI conversation stopped for debriefing in session {session.session_id}")
-                    
+
                     await _execute_debriefing(session, user, db, logger, oaw, role_provider)
+
+                    # 自由選択モード（保健師=人間）の完了時はIRT判定も実行する
+                    _schedule_irt_judgment_for_human_session(session.session_id, user.role, logger)
 
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)
@@ -2963,6 +3006,10 @@ def api(config):
                         db_session.status = 'completed'
                         db_session.completed_at = datetime.now()
                         db.commit()
+
+                    # 自由選択モード（保健師=人間）の完了時はIRT判定も実行する
+                    # （評価付き終了で判定済みの場合はヘルパー内でスキップされる）
+                    _schedule_irt_judgment_for_human_session(session.session_id, user.role, logger)
 
                     # 傍聴者の場合はAI対話を停止
                     if user.role == "傍聴者" and session.ai_conversation_manager:

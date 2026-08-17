@@ -10,12 +10,13 @@
             <v-tabs v-model="currentTab" grow>
               <v-tab value="patient">患者AI</v-tab>
               <v-tab value="interviewer">保健師AI</v-tab>
-              <v-tab value="evaluator">評価AI</v-tab>
+              <v-tab value="evaluator">判定AI（IRT）</v-tab>
+              <v-tab value="debriefing">総評AI（旧評価系）</v-tab>
             </v-tabs>
 
             <v-tabs-window v-model="currentTab">
               <v-tabs-window-item
-                v-for="templateType in ['patient', 'interviewer', 'evaluator']"
+                v-for="templateType in ['patient', 'interviewer', 'evaluator', 'debriefing']"
                 :key="templateType"
                 :value="templateType"
               >
@@ -233,32 +234,37 @@ const selectedPrompt = ref<PromptTemplate | null>(null);
 const activePrompts = reactive<Record<PromptTemplateType, PromptTemplate | null>>({
   patient: null,
   interviewer: null,
-  evaluator: null
+  evaluator: null,
+  debriefing: null
 });
 
 const allPrompts = reactive<Record<PromptTemplateType, PromptTemplate[]>>({
   patient: [],
   interviewer: [],
-  evaluator: []
+  evaluator: [],
+  debriefing: []
 });
 
 // ローディング状態
 const loadingActive = reactive<Record<PromptTemplateType, boolean>>({
   patient: false,
   interviewer: false,
-  evaluator: false
+  evaluator: false,
+  debriefing: false
 });
 
 const loadingAll = reactive<Record<PromptTemplateType, boolean>>({
   patient: false,
   interviewer: false,
-  evaluator: false
+  evaluator: false,
+  debriefing: false
 });
 
 const creating = reactive<Record<PromptTemplateType, boolean>>({
   patient: false,
   interviewer: false,
-  evaluator: false
+  evaluator: false,
+  debriefing: false
 });
 
 const activating = reactive<Record<number, boolean>>({});
@@ -280,6 +286,11 @@ const forms = reactive<Record<PromptTemplateType, {
     message_text: ''
   },
   evaluator: {
+    description: '',
+    prompt_text: '',
+    message_text: ''
+  },
+  debriefing: {
     description: '',
     prompt_text: '',
     message_text: ''
@@ -318,7 +329,8 @@ const getTemplateTypeLabel = (type: PromptTemplateType): string => {
   const labels = {
     patient: '患者AI',
     interviewer: '保健師AI',
-    evaluator: '評価AI'
+    evaluator: '判定AI（IRT）',
+    debriefing: '総評AI（旧評価系）'
   };
   return labels[type];
 };
