@@ -232,7 +232,16 @@ const { connect, disconnect, sendDebriefingRequest, sendContinueConversation, se
       return;
     }
 
-    // 通常セッションは従来の評価画面へ
+    // 新評価系（IRT判定）: サーバがIRT判定を実行済みなので判定結果画面へ
+    if (data && data.result_type === 'irt') {
+      router.push({
+        name: 'irt-result',
+        params: { sessionId: sessionStore.sessionId || 'current' }
+      });
+      return;
+    }
+
+    // 旧評価系（総評レポート）: サーバが旧デブリーフィングを返した場合のみ従来の評価画面へ
     router.push({
       name: 'debriefing',
       params: {

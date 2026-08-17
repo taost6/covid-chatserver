@@ -41,6 +41,12 @@ const router = createRouter({
       component: () => import('@/views/IRTManagementView.vue'),
     },
     {
+      path: '/result/:sessionId',
+      name: 'irt-result',
+      component: () => import('@/views/IRTResultView.vue'),
+      props: true,
+    },
+    {
       path: '/cbt/admin',
       name: 'cbt-admin',
       component: () => import('@/views/CBTAdminView.vue'),

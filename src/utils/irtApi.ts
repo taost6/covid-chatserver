@@ -108,9 +108,35 @@ export interface PatientSessionStat {
   created_at: string | null;
   nurse_model: string | null;
   patient_model: string | null;
+  user_name: string | null;
   correct_count: number;
   total_count: number;
   accuracy: number;
+  message_count: number;
+  nurse_turn_count: number;
+  question_count: number;
+  correct_per_10_questions: number | null;
+}
+
+export interface IRTSessionResultItem {
+  instance_id: number;
+  item_type_code: string;
+  description: string | null;
+  risk_score: number | null;
+  collected: boolean;
+}
+
+export interface IRTSessionResult {
+  session_id: string;
+  patient_id: string;
+  score: number;
+  total_item_count: number;
+  collected_item_count: number;
+  items: IRTSessionResultItem[];
+  message_count: number;
+  nurse_turn_count: number;
+  question_count: number;
+  correct_per_10_questions: number | null;
 }
 
 export interface PatientCategoryStat {
@@ -251,6 +277,10 @@ export const irtApi = {
 
   async getInstanceJudgments(instanceId: number): Promise<IRTResponseJudgment[]> {
     return await request<IRTResponseJudgment[]>(`${baseUrl()}/v1/irt/judgments/instance/${instanceId}`);
+  },
+
+  async getSessionResult(sessionId: string): Promise<IRTSessionResult> {
+    return request<IRTSessionResult>(`${baseUrl()}/v1/irt/session/${sessionId}/result`);
   },
 
   async getPatientStats(patientId: string): Promise<PatientStatsResponse> {

@@ -5,7 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict
 from typing import List, Union, Optional, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text as sql_text
 import uuid
 import os
 import asyncio
@@ -328,9 +328,15 @@ class PatientSessionStat(BaseModel):
     created_at: Optional[datetime]
     nurse_model: Optional[str]
     patient_model: Optional[str]
+    user_name: Optional[str] = None
     correct_count: int
     total_count: int
     accuracy: float
+    # 対話量・質問数と、それによる正規化指標（人間とAIの効率比較用）
+    message_count: int = 0            # 対話メッセージ総数（保健師+患者、初期メッセージ除く）
+    nurse_turn_count: int = 0         # 保健師の発話数
+    question_count: int = 0           # 保健師発話中の質問数（疑問符の出現数）
+    correct_per_10_questions: Optional[float] = None  # 質問10回あたりの正答数
 
 class PatientCategoryStat(BaseModel):
     category: str
@@ -1535,6 +1541,32 @@ def api(config):
 
     # --- IRT Judgment API ---
 
+    def _get_dialogue_metrics(db: Session, session_ids: list) -> dict:
+        """セッションごとの対話量・保健師発話数・質問数（疑問符の出現数）を一括集計する。
+
+        保健師発話の判定: AI保健師は ai_role='保健師'、人間保健師は sender='User' かつ
+        user_role='保健師'。初期メッセージ・システムメッセージは除外。
+        """
+        if not session_ids:
+            return {}
+        chat_table = modelDatabase.ChatLog.__tablename__
+        nurse_cond = "(ai_role = '保健師' OR (sender = 'User' AND user_role = '保健師'))"
+        rows = db.execute(sql_text(f"""
+            SELECT session_id,
+                   count(*) AS total_msgs,
+                   count(*) FILTER (WHERE {nurse_cond}) AS nurse_msgs,
+                   COALESCE(sum(
+                       (length(message) - length(replace(message, '？', ''))) +
+                       (length(message) - length(replace(message, '?', '')))
+                   ) FILTER (WHERE {nurse_cond}), 0) AS questions
+            FROM {chat_table}
+            WHERE session_id = ANY(:ids)
+              AND sender IN ('User', 'Assistant')
+              AND is_initial_message = FALSE
+            GROUP BY session_id
+        """), {"ids": list(session_ids)})
+        return {r.session_id: r for r in rows}
+
     async def _execute_irt_judgment(session_id: str, db: Session):
         """セッションの対話ログからIRTインスタンスの正誤を一括判定する"""
 
@@ -1838,6 +1870,20 @@ def api(config):
             judg_service = IRTResponseJudgmentService(db)
             all_judgments = judg_service.get_judgments_by_instance_ids(instance_ids)
         else:
+            from sqlalchemy import and_, or_
+            # デフォルト表示 = 正準AIセッション + 人間（保健師ロール）セッション。
+            # 旧試行・余剰(surplus)等の分析対象外AIセッションは除外する。
+            canonical_ai = and_(
+                SessionModel.user_name == 'IRT_Batch',
+                SessionModel.patient_model == 'gpt-4.1',
+                SessionModel.evaluator_model == 'gpt-5.4',
+                SessionModel.interviewer_model.in_(('gpt-4.1', 'gpt-5.2', 'gpt-5.5')),
+                SessionModel.interviewer_version.between(10, 14),
+            )
+            human_nurse = and_(
+                SessionModel.user_name != 'IRT_Batch',
+                SessionModel.user_role == '保健師',
+            )
             all_judgments = (
                 db.query(IRTResponseJudgment)
                 .join(SessionModel,
@@ -1845,11 +1891,7 @@ def api(config):
                 .filter(
                     IRTResponseJudgment.instance_id.in_(instance_ids),
                     SessionModel.status == 'completed',
-                    SessionModel.user_name == 'IRT_Batch',
-                    SessionModel.patient_model == 'gpt-4.1',
-                    SessionModel.evaluator_model == 'gpt-5.4',
-                    SessionModel.interviewer_model.in_(('gpt-4.1', 'gpt-5.2', 'gpt-5.5')),
-                    SessionModel.interviewer_version.between(10, 14),
+                    or_(canonical_ai, human_nurse),
                 )
                 .order_by(IRTResponseJudgment.instance_id,
                           IRTResponseJudgment.session_id)
@@ -1873,21 +1915,29 @@ def api(config):
             ).all()
             session_map = {s.session_id: s for s in session_records}
 
-        # セッション別統計
+        # セッション別統計（対話量・質問数の集計付き）
+        dialogue_metrics = _get_dialogue_metrics(db, list(session_ids))
         sessions_list = []
         for sid in sorted(session_ids):
             sj = judgments_by_session[sid]
             sr = session_map.get(sid)
             correct = sum(1 for j in sj if j.is_correct)
             total = len(sj)
+            dm = dialogue_metrics.get(sid)
+            q_count = int(dm.questions) if dm else 0
             sessions_list.append(PatientSessionStat(
                 session_id=sid,
                 created_at=sr.created_at if sr else None,
                 nurse_model=sr.interviewer_model if sr else None,
                 patient_model=sr.patient_model if sr else None,
+                user_name=sr.user_name if sr else None,
                 correct_count=correct,
                 total_count=total,
-                accuracy=correct / total if total > 0 else 0.0
+                accuracy=correct / total if total > 0 else 0.0,
+                message_count=int(dm.total_msgs) if dm else 0,
+                nurse_turn_count=int(dm.nurse_msgs) if dm else 0,
+                question_count=q_count,
+                correct_per_10_questions=round(correct / q_count * 10, 2) if q_count > 0 else None,
             ))
 
         # 項目別統計
@@ -2130,6 +2180,11 @@ def api(config):
         total_item_count: int
         collected_item_count: int
         items: List[CBTResultItem]       # 全項目（リスク降順）
+        # 対話量・質問数と正規化指標
+        message_count: int = 0
+        nurse_turn_count: int = 0
+        question_count: int = 0
+        correct_per_10_questions: Optional[float] = None
 
     async def _compute_cbt_score(session_id: str, db: Session):
         """セッションのIRT判定を実行（または取得）し、項目聴取率を算出する。
@@ -2175,13 +2230,39 @@ def api(config):
         # リスク降順でソート（参考情報として高リスク項目を上位に）
         result_items.sort(key=lambda x: (x.risk_score is None, -(x.risk_score or 0)))
 
+        # 対話量・質問数（人間とAIの効率比較用の正規化指標）
+        dm = _get_dialogue_metrics(db, [session_id]).get(session_id)
+        q_count = int(dm.questions) if dm else 0
+
         return {
             "patient_id": patient_id,
             "score": score,
             "total_item_count": total,
             "collected_item_count": collected_count,
             "items": result_items,
+            "message_count": int(dm.total_msgs) if dm else 0,
+            "nurse_turn_count": int(dm.nurse_msgs) if dm else 0,
+            "question_count": q_count,
+            "correct_per_10_questions": round(collected_count / q_count * 10, 2) if q_count > 0 else None,
         }
+
+    class IRTSessionResultResponse(BaseModel):
+        session_id: str
+        patient_id: str
+        score: float
+        total_item_count: int
+        collected_item_count: int
+        items: List[CBTResultItem]
+        message_count: int = 0
+        nurse_turn_count: int = 0
+        question_count: int = 0
+        correct_per_10_questions: Optional[float] = None
+
+    @app.get("/v1/irt/session/{session_id}/result", response_model=IRTSessionResultResponse)
+    async def get_irt_session_result(session_id: str, db: Session = Depends(get_db)):
+        """セッションのIRT判定結果（自由選択モードの判定結果画面用）。判定が無ければ実行してから返す。"""
+        result = await _compute_cbt_score(session_id, db)
+        return {"session_id": session_id, **result}
 
     @app.post("/v1/cbt/t/{token}/tasks/{progress_id}/score", response_model=CBTResultResponse)
     async def cbt_score_task(token: str, progress_id: int,
@@ -2961,10 +3042,30 @@ def api(config):
                         await session.ai_conversation_manager.stop_conversation()
                         logger.info(f"AI conversation stopped for debriefing in session {session.session_id}")
 
-                    await _execute_debriefing(session, user, db, logger, oaw, role_provider)
-
-                    # 自由選択モード（保健師=人間）の完了時はIRT判定も実行する
-                    _schedule_irt_judgment_for_human_session(session.session_id, user.role, logger)
+                    # 新評価系（デフォルト）: セッションを完了扱いにしてIRT判定を実行し、
+                    # クライアントをIRT判定結果画面へ誘導する。
+                    # 旧評価系（総評レポート）は _execute_debriefing として温存している。
+                    # 戻す場合はこのブロックを `await _execute_debriefing(session, user, db, logger, oaw, role_provider)` に置き換える。
+                    await _save_history(session.session_id, session.history, logger)
+                    db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+                    if db_session and db_session.status != 'completed':
+                        db_session.status = 'completed'
+                        db_session.completed_at = datetime.now()
+                        db.commit()
+                    try:
+                        judgment_service = IRTResponseJudgmentService(db)
+                        if not judgment_service.get_judgments_for_session(session.session_id):
+                            await _execute_irt_judgment(session.session_id, db)
+                        await user.ws.send_json(DebriefingResponse(
+                            session_id=session.session_id,
+                            debriefing_data={"result_type": "irt"}
+                        ).dict())
+                    except Exception as e:
+                        logger.error(f"IRT judgment on debriefing request failed: {e}")
+                        await user.ws.send_json(DebriefingResponse(
+                            session_id=session.session_id,
+                            debriefing_data={"result_type": "irt", "error": str(e)}
+                        ).dict())
 
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)

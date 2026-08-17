@@ -728,6 +728,15 @@
                           <template #item.created_at="{ item }">
                             {{ item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '-' }}
                           </template>
+                          <template #item.nurse_model="{ item }">
+                            <span v-if="item.nurse_model">{{ item.nurse_model }}</span>
+                            <v-chip v-else size="x-small" color="teal" variant="tonal">
+                              {{ item.user_name || '人間' }}（人間）
+                            </v-chip>
+                          </template>
+                          <template #item.correct_per_10_questions="{ item }">
+                            {{ item.correct_per_10_questions != null ? item.correct_per_10_questions.toFixed(2) : '-' }}
+                          </template>
                           <template #item.accuracy="{ item }">
                             <div class="d-flex align-center" style="min-width:140px">
                               <span class="mr-2">{{ item.correct_count }}/{{ item.total_count }}</span>
@@ -1482,8 +1491,11 @@ const patientItemHeaders = computed(() => [
 const sessionCompareHeaders = [
   { title: 'セッションID', key: 'session_id', width: '200px' },
   { title: '日時', key: 'created_at', width: '180px' },
-  { title: '保健師モデル', key: 'nurse_model', width: '130px' },
+  { title: '保健師', key: 'nurse_model', width: '130px' },
   { title: '患者モデル', key: 'patient_model', width: '130px' },
+  { title: '対話量', key: 'message_count', width: '80px' },
+  { title: '質問数', key: 'question_count', width: '80px' },
+  { title: '正答/10質問', key: 'correct_per_10_questions', width: '105px' },
   { title: '正答率', key: 'accuracy', width: '180px' },
 ];
 

@@ -37,6 +37,13 @@
                 聴取項目数：<strong>{{ result.collected_item_count }}</strong>
                 / {{ result.total_item_count }}
               </div>
+              <div class="text-body-2 mt-1">
+                対話量：<strong>{{ result.message_count }}</strong> メッセージ
+                ／ 質問数：<strong>{{ result.question_count }}</strong>
+              </div>
+              <div class="text-body-2 mt-1" v-if="result.correct_per_10_questions != null">
+                10質問あたりの聴取項目数：<strong>{{ result.correct_per_10_questions.toFixed(2) }}</strong>
+              </div>
             </div>
           </div>
         </v-card-text>
