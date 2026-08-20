@@ -1,5 +1,7 @@
 <template>
-  <div class="debriefing-view">
+  <!-- ?mode=irt 指定時は新評価（IRT判定結果）画面を表示 -->
+  <IRTResultView v-if="isIrtMode" />
+  <div v-else class="debriefing-view">
     <v-main class="debriefing-main">
       <v-container fluid class="pa-md-6 pa-4">
         <!-- Header -->
@@ -312,6 +314,7 @@ import AppHeader from '@/components/layout/AppHeader.vue';
 import DebriefingDrawer from '@/components/layout/DebriefingDrawer.vue';
 import PatientInfoPanel from '@/components/features/PatientInfoPanel.vue';
 import { processEvaluation } from '@/utils/markdown';
+import IRTResultView from '@/views/IRTResultView.vue';
 
 // 評価レポート用：マークダウン処理（カギかっこ除去処理を削除）
 const processEvaluationWithoutQuotes = (text: string): string => {
@@ -321,6 +324,9 @@ import type { DebriefingData, PatientInfo } from '@/types';
 
 const route = useRoute();
 const router = useRouter();
+
+// ?mode=irt が付いている場合は新評価（IRT判定結果）画面を表示する
+const isIrtMode = computed(() => route.query.mode === 'irt');
 
 // Stores
 const sessionStore = useSessionStore();
@@ -593,6 +599,8 @@ const restoreSessionInfo = async () => {
 
 // Initialize
 onMounted(async () => {
+  // ?mode=irt のときは IRTResultView 側が表示・データ取得を行うため、旧評価の読み込みはスキップ
+  if (isIrtMode.value) return;
   // Load font size from localStorage
   const savedFontSize = localStorage.getItem('chatFontSize');
   if (savedFontSize) {

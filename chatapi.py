@@ -1771,15 +1771,31 @@ def api(config):
 
         return saved
 
+    # セッション単位のIRT判定排他ロック（旧評価と並走する裏判定と、
+    # ?mode=irt での結果画面アクセスが同時に判定を起動する二重実行を防ぐ）
+    _irt_judgment_locks: dict = {}
+
+    async def _execute_irt_judgment_locked(session_id: str, db: Session, force: bool = False):
+        """IRT判定のセッション単位排他つき実行。
+
+        - force=False: 既存判定があればそれを返す（無ければ判定を実行）
+        - force=True: 既存判定を破棄して必ず再判定する（手動の再判定API用）
+        """
+        lock = _irt_judgment_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            if not force:
+                existing = IRTResponseJudgmentService(db).get_judgments_for_session(session_id)
+                if existing:
+                    return existing
+            return await _execute_irt_judgment(session_id, db)
+
     def _schedule_irt_judgment_for_human_session(session_id: str, user_role: str, logger):
-        """自由選択モードの保健師（人間）セッション完了時にIRT判定を非同期で実行する。
+        """自由選択モードのセッション完了時にIRT判定を非同期で実行する。
 
         - 判定には 'evaluator' 種別のアクティブプロンプト（IRT判定基準）を使用
         - 既に判定が存在するセッションは再判定しない（評価付き終了→終了の二重起動対策）
         - 失敗してもセッション終了処理は妨げない（ログのみ）
         """
-        if user_role != "保健師":
-            return
 
         async def _run():
             db2 = modelDatabase.SessionLocal()
@@ -1787,14 +1803,10 @@ def api(config):
                 srec = db2.query(SessionModel).filter(SessionModel.session_id == session_id).first()
                 if not srec or not srec.patient_id:
                     return
-                judgment_service = IRTResponseJudgmentService(db2)
-                if judgment_service.get_judgments_for_session(session_id):
-                    logger.info(f"IRT judgments already exist for session {session_id}; skipping")
-                    return
-                await _execute_irt_judgment(session_id, db2)
-                logger.info(f"IRT judgment completed for human session {session_id}")
+                await _execute_irt_judgment_locked(session_id, db2)
+                logger.info(f"IRT judgment ensured for session {session_id}")
             except Exception as e:
-                logger.error(f"IRT judgment for human session {session_id} failed: {e}")
+                logger.error(f"IRT judgment for session {session_id} failed: {e}")
             finally:
                 db2.close()
 
@@ -1802,8 +1814,8 @@ def api(config):
 
     @app.post("/v1/irt/judgments/evaluate/{session_id}")
     async def evaluate_irt_judgments(session_id: str, db: Session = Depends(get_db)):
-        """セッションの対話ログからIRT正誤判定を実行"""
-        results = await _execute_irt_judgment(session_id, db)
+        """セッションの対話ログからIRT正誤判定を実行（既存判定は破棄して再判定）"""
+        results = await _execute_irt_judgment_locked(session_id, db, force=True)
         return {
             "session_id": session_id,
             "judged_count": len(results),
@@ -2192,11 +2204,8 @@ def api(config):
         スコアは単純な聴取率（聴取できた項目数 ÷ 全項目数）。
         リスクスコアはスコアの重みには用いず、結果表示の参考情報としてのみ含める。
         """
-        # 既存判定があれば再利用、無ければ判定実行
-        judgment_service = IRTResponseJudgmentService(db)
-        judgments = judgment_service.get_judgments_for_session(session_id)
-        if not judgments:
-            judgments = await _execute_irt_judgment(session_id, db)
+        # 既存判定があれば再利用、無ければ判定実行（セッション単位の排他つき）
+        judgments = await _execute_irt_judgment_locked(session_id, db)
 
         session_record = db.query(SessionModel).filter(
             SessionModel.session_id == session_id
@@ -3042,30 +3051,12 @@ def api(config):
                         await session.ai_conversation_manager.stop_conversation()
                         logger.info(f"AI conversation stopped for debriefing in session {session.session_id}")
 
-                    # 新評価系（デフォルト）: セッションを完了扱いにしてIRT判定を実行し、
-                    # クライアントをIRT判定結果画面へ誘導する。
-                    # 旧評価系（総評レポート）は _execute_debriefing として温存している。
-                    # 戻す場合はこのブロックを `await _execute_debriefing(session, user, db, logger, oaw, role_provider)` に置き換える。
-                    await _save_history(session.session_id, session.history, logger)
-                    db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
-                    if db_session and db_session.status != 'completed':
-                        db_session.status = 'completed'
-                        db_session.completed_at = datetime.now()
-                        db.commit()
-                    try:
-                        judgment_service = IRTResponseJudgmentService(db)
-                        if not judgment_service.get_judgments_for_session(session.session_id):
-                            await _execute_irt_judgment(session.session_id, db)
-                        await user.ws.send_json(DebriefingResponse(
-                            session_id=session.session_id,
-                            debriefing_data={"result_type": "irt"}
-                        ).dict())
-                    except Exception as e:
-                        logger.error(f"IRT judgment on debriefing request failed: {e}")
-                        await user.ws.send_json(DebriefingResponse(
-                            session_id=session.session_id,
-                            debriefing_data={"result_type": "irt", "error": str(e)}
-                        ).dict())
+                    # 旧評価（総評レポート）と新評価（IRT判定）の両方を実行する。
+                    # - 旧評価: 従来どおり同期実行し、クライアントは旧評価画面へ遷移する
+                    # - 新評価: バックグラウンドで実行・保存（旧評価画面のURL末尾に
+                    #   ?mode=irt を付けるとIRT判定結果が表示される）
+                    await _execute_debriefing(session, user, db, logger, oaw, role_provider)
+                    _schedule_irt_judgment_for_human_session(session.session_id, user.role, logger)
 
                 elif msg_type == MsgType.ContinueConversationRequest.name:
                     m = ContinueConversationRequest.model_validate(data)
