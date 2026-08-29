@@ -1567,6 +1567,11 @@ def api(config):
         """), {"ids": list(session_ids)})
         return {r.session_id: r for r in rows}
 
+    # IRT判定に使うモデル。評価者アシスタントの既定モデル(gpt-4.1)ではなく、
+    # バッチ判定（bulk_rejudge_300.py の EVALUATOR_MODEL）と同一に固定して
+    # アプリ内判定とバッチ判定の判定系を揃える。
+    IRT_JUDGMENT_MODEL = "gpt-5.4"
+
     async def _execute_irt_judgment(session_id: str, db: Session):
         """セッションの対話ログからIRTインスタンスの正誤を一括判定する"""
 
@@ -1698,20 +1703,49 @@ def api(config):
                 await oaw.add_message_to_thread(judgment_assistant.thread_id, chunk)
                 logger.info(f"Sent IRT judgment prompt chunk {i+1}/{len(prompt_chunks)}")
 
-            final_instruction = "上記の情報を分析し、submit_irt_judgments 関数を呼び出して全IRT項目の判定結果を提出してください。"
-            response_text, tool_call = await oaw.send_message(
-                judgment_assistant,
-                final_instruction,
-                tools=[irt_judgment_tool],
-                tool_choice="required",
-                max_retries=5
-            )
+            valid_instance_ids = {inst.id for inst in detectable_instances}
+            # instance_id -> 判定。同一IDへの重複判定は最初のもののみ採用
+            collected_judgments = {}
+            instruction = "上記の情報を分析し、submit_irt_judgments 関数を呼び出して全IRT項目の判定結果を提出してください。"
+            # モデルが一部項目の判定を返し漏らすことがあるため、欠落分は追加要求で補完する
+            for attempt in range(3):
+                response_text, tool_call = await oaw.send_message(
+                    judgment_assistant,
+                    instruction,
+                    tools=[irt_judgment_tool],
+                    tool_choice="required",
+                    max_retries=5,
+                    model=IRT_JUDGMENT_MODEL
+                )
 
-            if not tool_call or tool_call.name != "submit_irt_judgments":
-                raise HTTPException(status_code=500, detail="LLM did not return expected tool call")
+                if not tool_call or tool_call.name != "submit_irt_judgments":
+                    raise HTTPException(status_code=500, detail="LLM did not return expected tool call")
 
-            result = json.loads(tool_call.arguments)
-            llm_judgments = result.get("judgments", [])
+                for j in json.loads(tool_call.arguments).get("judgments", []):
+                    iid = j.get("instance_id")
+                    if iid not in valid_instance_ids:
+                        logger.warning(f"Skipping unknown instance_id: {iid}")
+                    elif iid not in collected_judgments:
+                        collected_judgments[iid] = j
+
+                missing_ids = valid_instance_ids - set(collected_judgments)
+                if not missing_ids:
+                    break
+                logger.warning(
+                    f"IRT judgment attempt {attempt + 1}: {len(missing_ids)} instances missing "
+                    f"for session {session_id}: {sorted(missing_ids)}")
+                instruction = (
+                    "以下の instance_id の判定が提出されていません。該当項目のみ、"
+                    "submit_irt_judgments 関数で判定結果を提出してください: "
+                    + ", ".join(str(i) for i in sorted(missing_ids)))
+            else:
+                # 欠落を残したまま保存すると項目数の合わない不完全な判定がDBに残り続けるため、
+                # 保存せず失敗にする（次回アクセス時に再判定される）
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"IRT judgment incomplete: instances {sorted(missing_ids)} not judged after retries")
+
+            llm_judgments = list(collected_judgments.values())
             logger.info(f"LLM returned {len(llm_judgments)} judgments for session {session_id}")
 
         except HTTPException:
@@ -1734,25 +1768,10 @@ def api(config):
             logger.info(f"Deleted {deleted} existing judgments for session {session_id}")
 
         # 8. 判定結果をDBに保存
-        # 来歴記録: 使用したモデル（アシスタントのデフォルト）とプロンプトバージョン
-        try:
-            judgment_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
-        except Exception as e:
-            logger.warning(f"Failed to resolve evaluator model for provenance: {e}")
-            judgment_model = None
-
-        valid_instance_ids = {inst.id for inst in detectable_instances}
-        # LLMが同一instance_idに複数の判定を返すことがあるため、最初の判定のみ採用する
-        seen_instance_ids = set()
+        # 来歴記録: 実行時にモデルを明示指定しているため、それをそのまま記録する
+        # （不正ID・重複IDのフィルタは収集時に実施済み）
         db_judgments = []
         for j in llm_judgments:
-            if j.get("instance_id") not in valid_instance_ids:
-                logger.warning(f"Skipping unknown instance_id: {j.get('instance_id')}")
-                continue
-            if j["instance_id"] in seen_instance_ids:
-                logger.warning(f"Skipping duplicate judgment for instance_id: {j['instance_id']}")
-                continue
-            seen_instance_ids.add(j["instance_id"])
             db_judgments.append({
                 "session_id": session_id,
                 "instance_id": j["instance_id"],
@@ -1760,7 +1779,7 @@ def api(config):
                 "judgment_method": "ai",
                 "confidence": j.get("confidence"),
                 "notes": j.get("reasoning"),
-                "evaluator_model": judgment_model,
+                "evaluator_model": IRT_JUDGMENT_MODEL,
                 "evaluator_prompt_version": irt_eval_template.version,
                 "votes_total": 1,
                 "votes_correct": 1 if j["is_correct"] else 0,
