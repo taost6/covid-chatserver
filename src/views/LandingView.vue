@@ -52,6 +52,16 @@
         </article>
       </section>
     </v-container>
+
+    <aside class="site-credit" aria-label="管理者クレジット">
+      <span class="credit-label">管理者：北見工業大学 保健管理センター</span>
+      <a
+        class="credit-link"
+        href="https://www.hack.kitami-it.ac.jp/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >https://www.hack.kitami-it.ac.jp/</a>
+    </aside>
   </v-main>
 </template>
 
@@ -191,6 +201,38 @@
   border-top: 4px solid #475569;
 }
 
+.site-credit {
+  position: fixed;
+  right: 20px;
+  bottom: 14px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 8px 14px;
+  border: 1px solid var(--landing-line);
+  border-radius: 14px;
+  background: var(--landing-paper);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  color: #475569;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.credit-link {
+  color: var(--landing-navy);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.credit-link:hover,
+.credit-link:focus-visible {
+  text-decoration: underline;
+}
+
 @media (max-width: 960px) {
   .info-grid {
     grid-template-columns: 1fr;
@@ -209,6 +251,13 @@
 
   .hero-actions {
     flex-direction: column;
+  }
+
+  /* 狭い画面では固定表示がコンテンツに重なるため、末尾に右寄せで配置する */
+  .site-credit {
+    position: static;
+    width: fit-content;
+    margin: 20px 14px 0 auto;
   }
 }
 </style>
