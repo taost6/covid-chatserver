@@ -9,7 +9,6 @@ import os
 import json
 import re
 from datetime import datetime, timedelta
-import random
 import argparse
 import asyncio
 from chatconf import ChatConfigModel, set_config
@@ -104,29 +103,23 @@ class PatientRoleProvider:
         return {col: self.df.columns.tolist().index(col) if col in self.df.columns else -1 for col in self.target_columns}
 
     def _determine_interview_date(self, base_date_str: str) -> (datetime, str):
-        """基準日（原則として診断日）に基づいて調査日と時間帯を確率的に決定する"""
-        onset_date = None
+        """調査日を基準日（原則として診断日）の2日後に固定する。"""
+        base_date = None
         # base_date_strが文字列でない場合やNone、空文字列の場合のチェック
         if not base_date_str or base_date_str == "不明" or pd.isna(base_date_str):
-            onset_date = datetime(2022, 4, 30)  # デフォルト日付
+            base_date = datetime(2022, 4, 30)  # デフォルト日付
         else:
             try:
                 # 文字列から日付への変換を試みる
-                onset_date = pd.to_datetime(base_date_str)
+                base_date = pd.to_datetime(base_date_str)
                 # 変換結果がNaT（Not a Time）の場合も考慮
-                if pd.isna(onset_date):
-                    onset_date = datetime(2022, 4, 30)
+                if pd.isna(base_date):
+                    base_date = datetime(2022, 4, 30)
             except (ValueError, TypeError):
                 # 変換に失敗した場合はデフォルト日付を使用
-                onset_date = datetime(2022, 4, 30)
+                base_date = datetime(2022, 4, 30)
 
-        rand_val = random.random()
-        if rand_val < 0.5:
-            return onset_date, "（午後・夜間）"
-        elif rand_val < 0.9:
-            return onset_date + timedelta(days=1), ""
-        else:
-            return onset_date + timedelta(days=2), ""
+        return base_date + timedelta(days=2), ""
 
     def _split_text_for_prompt(self, text: str, max_length: int) -> List[str]:
         """指定された最大長に基づいて、キリの良い場所でテキストを分割する。"""
@@ -165,7 +158,7 @@ class PatientRoleProvider:
     def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None, prompt_version: int = None) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
-        interview_date_strが指定された場合はその日付を、されなければ動的に日付を決定する。
+        interview_date_strが指定された場合はその日付を、されなければ基準日の2日後に固定する。
         """
         if self.df is None:
             raise RuntimeError("Provider is not initialized. Call `await provider.initialize()` first.")
