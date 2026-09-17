@@ -1,3 +1,5 @@
+import type { AssessmentEvidence, AssessmentMetrics } from '@/types/assessment';
+
 export interface IRTItemType {
   id: number;
   catalog_version: number;
@@ -51,11 +53,7 @@ export interface IRTResponseJudgment {
   judged_at: string;
 }
 
-export interface IRTJudgmentEvaluateResult {
-  session_id: string;
-  judged_count: number;
-  judgments: IRTResponseJudgment[];
-}
+
 
 export interface BatchStartResponse {
   batch_id: string;
@@ -68,6 +66,7 @@ export interface BatchResultEntry {
   run_number: number;
   status: string;
   correct_count: number | null;
+  pending_item_count?: number;
   total_count: number | null;
   error: string | null;
 }
@@ -118,7 +117,7 @@ export interface PatientSessionStat {
   correct_per_10_questions: number | null;
 }
 
-export interface IRTSessionResultItem {
+export interface IRTSessionResultItem extends AssessmentEvidence {
   instance_id: number;
   item_type_code: string;
   description: string | null;
@@ -126,10 +125,10 @@ export interface IRTSessionResultItem {
   collected: boolean;
 }
 
-export interface IRTSessionResult {
+export interface IRTSessionResult extends AssessmentMetrics {
   session_id: string;
   patient_id: string;
-  score: number;
+  score: number | null;
   total_item_count: number;
   collected_item_count: number;
   items: IRTSessionResultItem[];
@@ -265,8 +264,8 @@ export const irtApi = {
   },
 
   // 正誤判定
-  async evaluateSession(sessionId: string): Promise<IRTJudgmentEvaluateResult> {
-    return await request<IRTJudgmentEvaluateResult>(`${baseUrl()}/v1/irt/judgments/evaluate/${sessionId}`, {
+  async evaluateSession(sessionId: string): Promise<IRTSessionResult> {
+    return await request<IRTSessionResult>(`${baseUrl()}/v1/irt/judgments/evaluate/${sessionId}`, {
       method: 'POST',
     });
   },

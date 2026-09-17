@@ -28,49 +28,27 @@ export class CSVExporter {
     return headerRow + dataRows;
   }
 
-  static async downloadCSV(filename: string, csvContent: string) {
-    try {
-      console.log('Attempting to encode CSV to Shift-JIS');
-      
-      // Convert string to Shift_JIS byte array using encoding-japanese
-      const sjisArray = Encoding.convert(csvContent, {
-        to: 'SJIS',
-        from: 'UNICODE',
-        type: 'array'
-      });
-
-      console.log('Shift-JIS encoding successful, creating blob');
-      
-      const blob = new Blob([new Uint8Array(sjisArray)], { 
-        type: 'text/csv;charset=shift_jis;' 
-      });
-      
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      console.log('CSV download completed with Shift-JIS encoding');
-    } catch (error) {
-      console.error('CSV Shift-JIS encoding failed:', error);
-      console.log('Falling back to UTF-8');
-      
-      // Fallback to regular UTF-8 download
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', filename);
-      link.style.visibility = 'hidden';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+  static async downloadCSV(filename: string, csvContent: string, encoding: 'SJIS' | 'UTF8' = 'SJIS') {
+    let blob: Blob;
+    if (encoding === 'UTF8') {
+      blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    } else {
+      try {
+        const bytes = Encoding.convert(csvContent, { to: 'SJIS', from: 'UNICODE', type: 'array' });
+        blob = new Blob([new Uint8Array(bytes)], { type: 'text/csv;charset=shift_jis;' });
+      } catch (error) {
+        console.error('CSV Shift-JIS encoding failed:', error);
+        blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      }
     }
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.download = filename;
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 }

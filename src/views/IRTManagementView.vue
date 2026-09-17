@@ -435,7 +435,8 @@
                             </v-chip>
                           </template>
                           <template #item.score="{ item }">
-                            <span v-if="item.correct_count != null">
+                            <span v-if="item.pending_item_count">保留 {{ item.pending_item_count }} 項目（聴取率未確定）</span>
+                            <span v-else-if="item.correct_count != null">
                               {{ item.correct_count }}/{{ item.total_count }}
                               ({{ item.total_count > 0 ? Math.round(item.correct_count / item.total_count * 100) : 0 }}%)
                             </span>
@@ -478,6 +479,10 @@
                             </v-btn>
                           </v-col> -->
                           <v-col v-if="selectedSessionId" cols="auto" class="ml-2">
+                            <v-btn size="small" variant="text"
+                              :to="{ name: 'irt-result', params: { sessionId: selectedSessionId } }">
+                              採点結果
+                            </v-btn>
                             <v-btn
                               size="small"
                               variant="text"
@@ -499,7 +504,7 @@
                         <v-alert
                           v-if="!selectedSessionId"
                           type="info"
-                          text="セッションを選択して個別判定結果を確認できます"
+                          text="セッションを選択してください。現在の採点は「採点結果」、旧形式の保存履歴は下の一覧で確認できます。"
                           density="compact"
                           class="mb-4"
                         />
@@ -1393,13 +1398,13 @@ const evaluateSession = async () => {
   evaluating.value = true;
   try {
     const result = await irtApi.evaluateSession(selectedSessionId.value);
-    judgments.value = result.judgments;
+    await loadSessionJudgments();
     // 項目マップも更新
     const session = sessions.value.find(s => s.session_id === selectedSessionId.value);
     if (session?.patient_id) {
       await buildInstanceMap(session.patient_id);
     }
-    showSnackbar(`${result.judged_count} 件の判定が完了しました`);
+    showSnackbar(`${result.total_item_count} 件の判定が完了しました。結果画面で確認できます。`);
   } catch (error) {
     console.error('Failed to evaluate session:', error);
     showSnackbar('判定に失敗しました', 'error');

@@ -25,29 +25,19 @@
             <div>
               <div class="text-caption text-grey">項目聴取率</div>
               <div class="text-h3 font-weight-bold" :class="scoreColorClass">
-                {{ (result.score * 100).toFixed(1) }}<span class="text-h6">%</span>
+                {{ result.score == null ? '—' : (result.score * 100).toFixed(1) }}<span class="text-h6">%</span>
               </div>
               <div class="text-caption text-grey mt-1">
-                聴取できた項目数 ÷ 全項目数
+                {{ result.assessment_version ? '○の項目数 ÷ 対象項目数（保留時は未確定）' : '旧判定の聴取項目数 ÷ 全項目数' }}
               </div>
             </div>
             <v-divider vertical class="d-none d-sm-flex" />
-            <div>
-              <div class="text-body-2">
-                聴取項目数：<strong>{{ result.collected_item_count }}</strong>
-                / {{ result.total_item_count }}
-              </div>
-              <div class="text-body-2 mt-1">
-                対話量：<strong>{{ result.message_count }}</strong> メッセージ
-                ／ 質問数：<strong>{{ result.question_count }}</strong>
-              </div>
-              <div class="text-body-2 mt-1" v-if="result.correct_per_10_questions != null">
-                10質問あたりの聴取項目数：<strong>{{ result.correct_per_10_questions.toFixed(2) }}</strong>
-              </div>
-            </div>
+            <AssessmentMetricsPanel :result="result" />
           </div>
         </v-card-text>
       </v-card>
+
+      <AssessmentEvidencePanel :result="result" />
 
       <!-- 聞き漏らした高リスク項目 -->
       <v-card variant="outlined" class="mb-6" v-if="missedHighRisk.length">
@@ -84,8 +74,9 @@
             <span v-else>—</span>
           </template>
           <template #item.collected="{ item }">
-            <v-icon v-if="item.collected" color="success" size="small">mdi-check-circle</v-icon>
-            <v-icon v-else color="grey-lighten-1" size="small">mdi-close-circle-outline</v-icon>
+            <span :class="item.grade === 'full' ? 'text-success' : item.grade === 'incidental' ? 'text-orange-darken-3' : ''">
+              {{ gradeLabel(item.grade, item.collected) }}
+            </span>
           </template>
         </v-data-table>
       </v-card>
@@ -99,6 +90,9 @@
 </template>
 
 <script setup lang="ts">
+import AssessmentMetricsPanel from '@/components/features/AssessmentMetricsPanel.vue';
+import AssessmentEvidencePanel from '@/components/features/AssessmentEvidencePanel.vue';
+import { gradeLabel } from '@/types/assessment';
 import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { irtApi, type IRTSessionResult } from '@/utils/irtApi';
@@ -115,7 +109,7 @@ const itemHeaders = [
   { title: '項目', key: 'item_type_code', width: '90px' },
   { title: '内容', key: 'description' },
   { title: 'リスク', key: 'risk_score', width: '90px' },
-  { title: '聴取', key: 'collected', width: '70px' },
+  { title: '聴取', key: 'collected', width: '160px' },
 ];
 
 const scoreColorClass = computed(() => {
@@ -128,7 +122,7 @@ const scoreColorClass = computed(() => {
 const missedHighRisk = computed(() => {
   if (!result.value) return [];
   return result.value.items
-    .filter((it) => !it.collected && (it.risk_score ?? 0) >= 0.5)
+    .filter((it) => !it.collected && it.grade !== 'pending' && (it.risk_score ?? 0) >= 0.5)
     .slice(0, 10);
 });
 

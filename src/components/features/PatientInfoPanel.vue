@@ -11,6 +11,10 @@
           患者情報・シチュエーション
         </v-expansion-panel-title>
         <v-expansion-panel-text>
+          <v-alert type="info" variant="tonal" class="mb-3">
+            今回の課題では、感染のきっかけを探るために発症前・診断前の行動や接触を確認します。
+            症状がない場合も、検査に至った経緯や接触状況を確認してください。
+          </v-alert>
           <v-list density="compact">
             <v-list-item 
               v-if="showStaffInfo && sessionStore.userName" 

@@ -1,4 +1,5 @@
 // CBT（Computer-Based Testing）プラットフォーム API クライアント
+import type { AssessmentEvidence, AssessmentMetrics } from '@/types/assessment';
 
 export interface CBTTask {
   progress_id: number;
@@ -28,7 +29,7 @@ export interface CBTNextTask {
   total_count: number;
 }
 
-export interface CBTResultItem {
+export interface CBTResultItem extends AssessmentEvidence {
   instance_id: number;
   item_type_code: string;
   description: string | null;
@@ -36,10 +37,10 @@ export interface CBTResultItem {
   collected: boolean;
 }
 
-export interface CBTResult {
+export interface CBTResult extends AssessmentMetrics {
   progress_id: number;
   patient_id: string;
-  score: number;
+  score: number | null;
   total_item_count: number;
   collected_item_count: number;
   items: CBTResultItem[];
