@@ -16,7 +16,7 @@
 
             <v-tabs-window v-model="currentTab">
               <v-tabs-window-item
-                v-for="templateType in ['patient', 'interviewer', 'evaluator', 'debriefing']"
+                v-for="templateType in templateTypes"
                 :key="templateType"
                 :value="templateType"
               >
@@ -226,6 +226,8 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { api } from '@/utils/api';
 import type { PromptTemplate, PromptTemplateType } from '@/types';
 
+const templateTypes: PromptTemplateType[] = ['patient', 'interviewer', 'evaluator', 'debriefing'];
+
 const currentTab = ref<PromptTemplateType>('patient');
 const detailDialog = ref(false);
 const selectedPrompt = ref<PromptTemplate | null>(null);
@@ -422,7 +424,6 @@ const showPromptDetail = (prompt: PromptTemplate) => {
 };
 
 const loadData = async () => {
-  const templateTypes: PromptTemplateType[] = ['patient', 'interviewer', 'evaluator'];
   
   for (const type of templateTypes) {
     await Promise.all([

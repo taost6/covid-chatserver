@@ -78,6 +78,20 @@ class IRTResponseJudgment(Base):
     votes_correct = Column(Integer, nullable=True)               # 「正答」と判定した票数
 
 
+class IRTAssessmentRun(Base):
+    """Immutable assessment with frozen item definitions and evidence. Legacy rows stay intact."""
+    __tablename__ = f"irt_assessment_runs{TABLE_SUFFIX}"
+
+    id = Column(String(36), primary_key=True)
+    session_id = Column(String, nullable=False, index=True)
+    rubric_version = Column(String(40), nullable=False)
+    evaluator_model = Column(String(50), nullable=False)
+    input_hash = Column(String(64), nullable=False)
+    input_json = Column(Text, nullable=False)
+    result_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class IRTItemTypeService:
     """IRT項目タイプカタログのCRUD操作"""
     def __init__(self, db: Session):

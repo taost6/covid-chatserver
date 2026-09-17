@@ -338,6 +338,8 @@ class OpenAIAssistantWrapper():
                            user_role: Optional[str] = None,
                            model: Optional[str] = None,
                            instructions: Optional[str] = None,
+                           max_output_tokens: Optional[int] = None,
+                           truncation: str = "auto",
                            ) -> (Optional[str], Optional[Any]):
             if tools is None:
                 tools = []
@@ -404,8 +406,10 @@ class OpenAIAssistantWrapper():
                 "input": input_messages,
                 "tools": tools,
                 "store": True,
-                "truncation": "auto",
+                "truncation": truncation,
             }
+            if max_output_tokens is not None:
+                api_params["max_output_tokens"] = max_output_tokens
             if actual_instructions:
                 api_params["instructions"] = actual_instructions
             if tool_choice:

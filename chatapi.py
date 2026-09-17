@@ -29,9 +29,28 @@ from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 from irt_batch_runner import IRTBatchRunner
+from intent_assessment_service import ensure_assessment, get_saved, saved_result
 
 # Logger setup
 logger = logging.getLogger(__name__)
+
+
+class AssessmentMetrics(BaseModel):
+    assessment_version: Optional[str] = None
+    evaluator_prompt_version: Optional[int] = None
+    evaluator_model: Optional[str] = None
+    display_message_count: Optional[int] = None
+    initial_message_count: Optional[int] = None
+    assessed_item_count: Optional[int] = None
+    incidental_item_count: Optional[int] = None
+    missing_item_count: Optional[int] = None
+    pending_item_count: Optional[int] = None
+    confirmation_count: Optional[int] = None
+    explanation_count: Optional[int] = None
+    other_act_count: Optional[int] = None
+    legacy_question_mark_count: Optional[int] = None
+    acts: Optional[List[dict]] = None
+    interview_date: Optional[str] = None
 
 class ConversationEndDetector:
     """会話終了検出専用Assistantの管理クラス"""
@@ -1572,241 +1591,21 @@ def api(config):
     # アプリ内判定とバッチ判定の判定系を揃える。
     IRT_JUDGMENT_MODEL = "gpt-5.4"
 
-    async def _execute_irt_judgment(session_id: str, db: Session):
-        """セッションの対話ログからIRTインスタンスの正誤を一括判定する"""
-
-        # 1. セッション情報取得
-        session_record = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
-        if not session_record:
-            raise HTTPException(status_code=404, detail="Session not found")
-        # statusチェック緩和: completedでなくてもchat_logsがあれば許可（バッチ実行対応）
-        if session_record.status != 'completed':
-            has_logs = db.query(modelDatabase.ChatLog).filter(
-                modelDatabase.ChatLog.session_id == session_id,
-                modelDatabase.ChatLog.sender.in_(["User", "Assistant"]),
-                modelDatabase.ChatLog.is_initial_message == False
-            ).first()
-            if not has_logs:
-                raise HTTPException(status_code=400, detail="Session is not completed yet and has no chat logs")
-
-        patient_id = session_record.patient_id
-        if not patient_id:
-            raise HTTPException(status_code=400, detail="Session has no patient_id")
-
-        # 2. 対話ログ取得（保健師・患者の発言のみ）
-        chat_logs = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.session_id == session_id,
-            modelDatabase.ChatLog.sender.in_(["User", "Assistant"]),
-            modelDatabase.ChatLog.is_initial_message == False
-        ).order_by(modelDatabase.ChatLog.created_at).all()
-
-        if not chat_logs:
-            raise HTTPException(status_code=400, detail="No chat logs found for this session")
-
-        conversation_history = "\n".join([
-            f"{log.ai_role or log.user_role}: {log.message}"
-            for log in chat_logs
-            if log.message and not log.message.startswith("Debriefing Data:")
-        ])
-
-        # 3. IRTインスタンス取得
-        instance_service = IRTPatientInstanceService(db)
-        instances = instance_service.get_instances_for_patient(patient_id)
-        if not instances:
-            raise HTTPException(status_code=400, detail=f"No IRT instances found for patient {patient_id}")
-
-        # is_detectable=True のインスタンスのみ判定対象
-        detectable_instances = [inst for inst in instances if inst.is_detectable]
-        if not detectable_instances:
-            raise HTTPException(status_code=400, detail="No detectable IRT instances for this patient")
-
-        instances_text = "\n".join([
-            f"- ID:{inst.id} [{inst.item_type_code}] {inst.description or ''}"
-            for inst in detectable_instances
-        ])
-
-        # 4. 判定用プロンプト取得
-        prompt_db = modelDatabase.PromptSessionLocal()
+    async def _saved_or_evaluate_result(session_id: str, db: Session):
+        """Use saved intent assessments; preserve old sessions until explicitly re-evaluated."""
+        session = db.query(SessionModel).filter_by(session_id=session_id).first()
+        if not session or not session.patient_id:
+            raise HTTPException(status_code=404, detail='Session not found')
+        saved = get_saved(db, session_id)
+        if saved:
+            return saved_result(saved)
+        if IRTResponseJudgmentService(db).get_judgments_for_session(session_id):
+            return None
+        assessment_db = modelDatabase.SessionLocal()
         try:
-            prompt_service = PromptTemplateService(prompt_db)
-            irt_eval_template = prompt_service.get_active_template('evaluator')
+            return await ensure_assessment(assessment_db, session_id, oaw, evaluator_model=IRT_JUDGMENT_MODEL)
         finally:
-            prompt_db.close()
-
-        if not irt_eval_template:
-            raise RuntimeError("評価者プロンプトがDBに登録されていません。プロンプト管理画面から登録してください。")
-
-        base_prompt = irt_eval_template.prompt_text
-
-        full_prompt = (
-            f"{base_prompt}\n\n"
-            f"【判定対象のIRT項目一覧】\n{instances_text}\n\n"
-            f"【対話履歴】\n{conversation_history}\n\n"
-            f"上記の対話履歴を分析し、各IRT項目について submit_irt_judgments 関数を呼び出して判定結果を提出してください。"
-        )
-
-        # 5. Function Calling ツール定義
-        irt_judgment_tool = {
-            "type": "function",
-            "name": "submit_irt_judgments",
-            "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "judgments": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
-                                "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
-                                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
-                                "reasoning": {"type": "string", "description": "判定の根拠"}
-                            },
-                            "required": ["instance_id", "is_correct", "confidence", "reasoning"]
-                        }
-                    }
-                },
-                "required": ["judgments"]
-            }
-        }
-
-        # 6. LLM呼び出し（専用スレッド）
-        try:
-            with open("assistants.json", "r") as f:
-                assistants = json.load(f)
-            if len(assistants) < 3:
-                raise HTTPException(status_code=500, detail="Evaluator assistant ID not found in assistants.json")
-            evaluator_assistant_id = assistants[2]
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load assistant config: {e}")
-
-        judgment_thread_id = None
-        try:
-            judgment_thread_id = await oaw.create_thread()
-            logger.info(f"Created IRT judgment thread: {judgment_thread_id}")
-
-            judgment_assistant = AssistantDef(
-                user_id=ai_get_id(),
-                role="評価者",
-                assistant_id=evaluator_assistant_id,
-                thread_id=judgment_thread_id
-            )
-
-            # プロンプトを分割送信
-            prompt_chunks = role_provider._split_text_for_prompt(full_prompt, 2000)
-            logger.info(f"Split IRT judgment prompt into {len(prompt_chunks)} chunks")
-
-            for i, chunk in enumerate(prompt_chunks):
-                await oaw.add_message_to_thread(judgment_assistant.thread_id, chunk)
-                logger.info(f"Sent IRT judgment prompt chunk {i+1}/{len(prompt_chunks)}")
-
-            valid_instance_ids = {inst.id for inst in detectable_instances}
-            # instance_id -> 判定。同一IDへの重複判定は最初のもののみ採用
-            collected_judgments = {}
-            instruction = "上記の情報を分析し、submit_irt_judgments 関数を呼び出して全IRT項目の判定結果を提出してください。"
-            # モデルが一部項目の判定を返し漏らすことがあるため、欠落分は追加要求で補完する
-            for attempt in range(3):
-                response_text, tool_call = await oaw.send_message(
-                    judgment_assistant,
-                    instruction,
-                    tools=[irt_judgment_tool],
-                    tool_choice="required",
-                    max_retries=5,
-                    model=IRT_JUDGMENT_MODEL
-                )
-
-                if not tool_call or tool_call.name != "submit_irt_judgments":
-                    raise HTTPException(status_code=500, detail="LLM did not return expected tool call")
-
-                for j in json.loads(tool_call.arguments).get("judgments", []):
-                    iid = j.get("instance_id")
-                    if iid not in valid_instance_ids:
-                        logger.warning(f"Skipping unknown instance_id: {iid}")
-                    elif iid not in collected_judgments:
-                        collected_judgments[iid] = j
-
-                missing_ids = valid_instance_ids - set(collected_judgments)
-                if not missing_ids:
-                    break
-                logger.warning(
-                    f"IRT judgment attempt {attempt + 1}: {len(missing_ids)} instances missing "
-                    f"for session {session_id}: {sorted(missing_ids)}")
-                instruction = (
-                    "以下の instance_id の判定が提出されていません。該当項目のみ、"
-                    "submit_irt_judgments 関数で判定結果を提出してください: "
-                    + ", ".join(str(i) for i in sorted(missing_ids)))
-            else:
-                # 欠落を残したまま保存すると項目数の合わない不完全な判定がDBに残り続けるため、
-                # 保存せず失敗にする（次回アクセス時に再判定される）
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"IRT judgment incomplete: instances {sorted(missing_ids)} not judged after retries")
-
-            llm_judgments = list(collected_judgments.values())
-            logger.info(f"LLM returned {len(llm_judgments)} judgments for session {session_id}")
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"IRT judgment LLM call failed: {e}")
-            raise HTTPException(status_code=500, detail=f"LLM judgment failed: {e}")
-        finally:
-            if judgment_thread_id:
-                try:
-                    await oaw.delete_thread_by_id(judgment_thread_id)
-                    logger.info(f"Deleted IRT judgment thread: {judgment_thread_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete IRT judgment thread: {e}")
-
-        # 7. 既存の判定を削除して再判定
-        judgment_service = IRTResponseJudgmentService(db)
-        deleted = judgment_service.delete_judgments_for_session(session_id)
-        if deleted > 0:
-            logger.info(f"Deleted {deleted} existing judgments for session {session_id}")
-
-        # 8. 判定結果をDBに保存
-        # 来歴記録: 実行時にモデルを明示指定しているため、それをそのまま記録する
-        # （不正ID・重複IDのフィルタは収集時に実施済み）
-        db_judgments = []
-        for j in llm_judgments:
-            db_judgments.append({
-                "session_id": session_id,
-                "instance_id": j["instance_id"],
-                "is_correct": j["is_correct"],
-                "judgment_method": "ai",
-                "confidence": j.get("confidence"),
-                "notes": j.get("reasoning"),
-                "evaluator_model": IRT_JUDGMENT_MODEL,
-                "evaluator_prompt_version": irt_eval_template.version,
-                "votes_total": 1,
-                "votes_correct": 1 if j["is_correct"] else 0,
-            })
-
-        saved = judgment_service.bulk_create_judgments(db_judgments)
-        logger.info(f"Saved {len(saved)} IRT judgments for session {session_id}")
-
-        return saved
-
-    # セッション単位のIRT判定排他ロック（旧評価と並走する裏判定と、
-    # ?mode=irt での結果画面アクセスが同時に判定を起動する二重実行を防ぐ）
-    _irt_judgment_locks: dict = {}
-
-    async def _execute_irt_judgment_locked(session_id: str, db: Session, force: bool = False):
-        """IRT判定のセッション単位排他つき実行。
-
-        - force=False: 既存判定があればそれを返す（無ければ判定を実行）
-        - force=True: 既存判定を破棄して必ず再判定する（手動の再判定API用）
-        """
-        lock = _irt_judgment_locks.setdefault(session_id, asyncio.Lock())
-        async with lock:
-            if not force:
-                existing = IRTResponseJudgmentService(db).get_judgments_for_session(session_id)
-                if existing:
-                    return existing
-            return await _execute_irt_judgment(session_id, db)
+            assessment_db.close()
 
     def _schedule_irt_judgment_for_human_session(session_id: str, user_role: str, logger):
         """自由選択モードのセッション完了時にIRT判定を非同期で実行する。
@@ -1822,7 +1621,7 @@ def api(config):
                 srec = db2.query(SessionModel).filter(SessionModel.session_id == session_id).first()
                 if not srec or not srec.patient_id:
                     return
-                await _execute_irt_judgment_locked(session_id, db2)
+                await _saved_or_evaluate_result(session_id, db2)
                 logger.info(f"IRT judgment ensured for session {session_id}")
             except Exception as e:
                 logger.error(f"IRT judgment for session {session_id} failed: {e}")
@@ -1832,21 +1631,18 @@ def api(config):
         asyncio.create_task(_run())
 
     @app.post("/v1/irt/judgments/evaluate/{session_id}")
-    async def evaluate_irt_judgments(session_id: str, db: Session = Depends(get_db)):
-        """セッションの対話ログからIRT正誤判定を実行（既存判定は破棄して再判定）"""
-        results = await _execute_irt_judgment_locked(session_id, db, force=True)
-        return {
-            "session_id": session_id,
-            "judged_count": len(results),
-            "judgments": [
-                IRTResponseJudgmentResponse(
-                    id=j.id, session_id=j.session_id, instance_id=j.instance_id,
-                    is_correct=j.is_correct, judgment_method=j.judgment_method,
-                    confidence=j.confidence, evidence_message_ids=j.evidence_message_ids,
-                    notes=j.notes, judged_at=j.judged_at
-                ) for j in results
-            ]
-        }
+    async def evaluate_irt_judgments(session_id: str, request: Request, db: Session = Depends(get_db)):
+        """Run the current evaluator; retain all previously saved results."""
+        _check_cbt_admin(request)
+        if not db.query(SessionModel).filter_by(session_id=session_id).first():
+            raise HTTPException(status_code=404, detail='Session not found')
+        assessment_db = modelDatabase.SessionLocal()
+        try:
+            result = await ensure_assessment(assessment_db, session_id, oaw,
+                                             evaluator_model=IRT_JUDGMENT_MODEL, force=True)
+            return {'session_id': session_id, **result}
+        finally:
+            assessment_db.close()
 
     @app.get("/v1/irt/judgments/session/{session_id}")
     async def get_irt_judgments_for_session(session_id: str, db: Session = Depends(get_db)):
@@ -2031,6 +1827,7 @@ def api(config):
     # --- IRT Batch API ---
 
     class BatchStartRequest(BaseModel):
+        model_config = ConfigDict(extra='forbid')
         patient_ids: List[str]
         runs_per_patient: int = 1
         concurrency: int = 2
@@ -2203,11 +2000,16 @@ def api(config):
         description: Optional[str]
         risk_score: Optional[float]
         collected: bool
+        grade: Optional[str] = None
+        reason: Optional[str] = None
+        confidence: Optional[float] = None
+        question_message_ids: Optional[List[int]] = None
+        answer_message_ids: Optional[List[int]] = None
 
-    class CBTResultResponse(BaseModel):
+    class CBTResultResponse(AssessmentMetrics):
         progress_id: int
         patient_id: str
-        score: float                    # 項目聴取率（0〜1）
+        score: Optional[float]          # 保留がある場合は未確定
         total_item_count: int
         collected_item_count: int
         items: List[CBTResultItem]       # 全項目（リスク降順）
@@ -2223,8 +2025,11 @@ def api(config):
         スコアは単純な聴取率（聴取できた項目数 ÷ 全項目数）。
         リスクスコアはスコアの重みには用いず、結果表示の参考情報としてのみ含める。
         """
-        # 既存判定があれば再利用、無ければ判定実行（セッション単位の排他つき）
-        judgments = await _execute_irt_judgment_locked(session_id, db)
+        intent_result = await _saved_or_evaluate_result(session_id, db)
+        if intent_result is not None:
+            return intent_result
+        # 旧版の判定はそのまま再利用する。旧Trueを意図を持った聴取とみなさない。
+        judgments = IRTResponseJudgmentService(db).get_judgments_for_session(session_id)
 
         session_record = db.query(SessionModel).filter(
             SessionModel.session_id == session_id
@@ -2274,10 +2079,10 @@ def api(config):
             "correct_per_10_questions": round(collected_count / q_count * 10, 2) if q_count > 0 else None,
         }
 
-    class IRTSessionResultResponse(BaseModel):
+    class IRTSessionResultResponse(AssessmentMetrics):
         session_id: str
         patient_id: str
-        score: float
+        score: Optional[float]
         total_item_count: int
         collected_item_count: int
         items: List[CBTResultItem]

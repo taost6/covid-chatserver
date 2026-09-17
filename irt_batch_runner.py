@@ -13,7 +13,6 @@ from modelUserDef import AssistantDef
 from modelRole import PatientRoleProvider
 from modelSession import Session as SessionModel
 from modelPrompt import PromptTemplateService
-from modelIRT import IRTPatientInstanceService, IRTResponseJudgmentService
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import get_id, log_message
 import modelDatabase
@@ -210,8 +209,10 @@ class HeadlessConversation:
                     turn_count += 1
                     current_turn = "patient" if current_turn == "nurse" else "nurse"
                 else:
-                    logger.warning(f"[Batch] Session {session_id}: AI response failed: {response_msg}")
-                    break
+                    # API呼び出しがリトライ上限まで失敗した場合はセッションを失敗として扱う。
+                    # ここで正常終了扱いにすると「挨拶のみの対話が completed になり全問不正解で
+                    # 判定される」データ汚染が起きる（2026-06-19/20に17件発生した実績あり）。
+                    raise RuntimeError(f"[Batch] Session {session_id}: AI response failed after retries: {response_msg}")
 
             # 5. スレッド削除
             return {
@@ -247,6 +248,14 @@ class IRTBatchRunner:
                           patient_prompt_version: Optional[int] = None,
                           interviewer_prompt_version: Optional[int] = None,
                           evaluator_prompt_version: Optional[int] = None) -> str:
+        # Resolve and validate the single evaluator before starting paid conversations.
+        from intent_assessment_service import assessment_settings
+        prompt_db = modelDatabase.PromptSessionLocal()
+        try:
+            settings = assessment_settings(prompt_db, evaluator_model, evaluator_prompt_version)
+            evaluator_prompt_version = settings['prompt_version']
+        finally:
+            prompt_db.close()
         batch_id = get_id()
         total = len(patient_ids) * runs_per_patient
 
@@ -358,6 +367,8 @@ class IRTBatchRunner:
                     else:
                         evaluator_tmpl = prompt_service.get_active_template('evaluator')
                     resolved_evaluator_version = evaluator_tmpl.version if evaluator_tmpl else None
+                    if evaluator_tmpl is None:
+                        raise ValueError('Evaluator prompt not found')
                     prompt_db.close()
 
                     db_session = SessionModel(
@@ -412,6 +423,7 @@ class IRTBatchRunner:
                     result_entry["phase"] = "completed"
                     result_entry["correct_count"] = judgment_result.get("correct_count", 0)
                     result_entry["total_count"] = judgment_result.get("total_count", 0)
+                    result_entry["pending_item_count"] = judgment_result.get("pending_item_count", 0)
                     state["completed"] += 1
 
                     logger.info(
@@ -495,165 +507,12 @@ class IRTBatchRunner:
     async def _execute_irt_judgment_for_batch(self, session_id: str, db,
                                                evaluator_model: Optional[str] = None,
                                                evaluator_prompt_version: Optional[int] = None) -> dict:
-        """バッチ用IRT判定（chatapi._execute_irt_judgmentのロジックを再利用）"""
-
-        session_record = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
-        if not session_record:
-            raise RuntimeError(f"Session {session_id} not found")
-
-        patient_id = session_record.patient_id
-        if not patient_id:
-            raise RuntimeError(f"Session {session_id} has no patient_id")
-
-        # 対話ログ取得
-        chat_logs = db.query(modelDatabase.ChatLog).filter(
-            modelDatabase.ChatLog.session_id == session_id,
-            modelDatabase.ChatLog.sender.in_(["User", "Assistant"]),
-            modelDatabase.ChatLog.is_initial_message == False
-        ).order_by(modelDatabase.ChatLog.created_at).all()
-
-        if not chat_logs:
-            raise RuntimeError(f"No chat logs found for session {session_id}")
-
-        conversation_history = "\n".join([
-            f"{log.ai_role or log.user_role}: {log.message}"
-            for log in chat_logs
-            if log.message and not log.message.startswith("Debriefing Data:")
-        ])
-
-        # IRTインスタンス取得
-        instance_service = IRTPatientInstanceService(db)
-        instances = instance_service.get_instances_for_patient(patient_id)
-        if not instances:
-            raise RuntimeError(f"No IRT instances found for patient {patient_id}")
-
-        detectable_instances = [inst for inst in instances if inst.is_detectable]
-        if not detectable_instances:
-            raise RuntimeError(f"No detectable IRT instances for patient {patient_id}")
-
-        instances_text = "\n".join([
-            f"- ID:{inst.id} [{inst.item_type_code}] {inst.description or ''}"
-            for inst in detectable_instances
-        ])
-
-        # 判定用プロンプト取得
-        prompt_db = modelDatabase.PromptSessionLocal()
-        try:
-            prompt_service = PromptTemplateService(prompt_db)
-            if evaluator_prompt_version is not None:
-                irt_eval_template = prompt_service.get_template_by_version('evaluator', evaluator_prompt_version)
-            else:
-                irt_eval_template = prompt_service.get_active_template('evaluator')
-        finally:
-            prompt_db.close()
-
-        if not irt_eval_template:
-            raise RuntimeError("評価者プロンプトがDBに登録されていません。プロンプト管理画面から登録してください。")
-
-        used_evaluator_prompt_version = irt_eval_template.version
-        base_prompt = irt_eval_template.prompt_text
-
-        full_prompt = (
-            f"{base_prompt}\n\n"
-            f"【判定対象のIRT項目一覧】\n{instances_text}\n\n"
-            f"【対話履歴】\n{conversation_history}\n\n"
-            f"上記の対話履歴を分析し、各IRT項目について submit_irt_judgments 関数を呼び出して判定結果を提出してください。"
-        )
-
-        irt_judgment_tool = {
-            "type": "function",
-            "name": "submit_irt_judgments",
-            "description": "対話ログに基づき、各IRT項目が正しく聴取されたかの判定結果を提出する",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "judgments": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "instance_id": {"type": "integer", "description": "IRT項目インスタンスのID"},
-                                "is_correct": {"type": "boolean", "description": "正しく聴取されたか"},
-                                "confidence": {"type": "number", "minimum": 0, "maximum": 1, "description": "確信度"},
-                                "reasoning": {"type": "string", "description": "判定の根拠"}
-                            },
-                            "required": ["instance_id", "is_correct", "confidence", "reasoning"]
-                        }
-                    }
-                },
-                "required": ["judgments"]
-            }
-        }
-
-        # LLM呼び出し
-        with open("assistants.json", "r") as f:
-            assistants = json.load(f)
-        if len(assistants) < 3:
-            raise RuntimeError("Evaluator assistant ID not found in assistants.json")
-
-        judgment_thread_id = None
-        try:
-            judgment_thread_id = await self.oaw.create_thread()
-
-            judgment_assistant = AssistantDef(
-                user_id=get_id(), role="評価者",
-                assistant_id=assistants[2], thread_id=judgment_thread_id
-            )
-
-            prompt_chunks = self.role_provider._split_text_for_prompt(full_prompt, 2000)
-            for chunk in prompt_chunks:
-                await self.oaw.add_message_to_thread(judgment_assistant.thread_id, chunk)
-
-            final_instruction = "上記の情報を分析し、submit_irt_judgments 関数を呼び出して全IRT項目の判定結果を提出してください。"
-            response_text, tool_call = await self.oaw.send_message(
-                judgment_assistant, final_instruction,
-                tools=[irt_judgment_tool],
-                tool_choice="required",
-                max_retries=5,
-                model=evaluator_model
-            )
-
-            if not tool_call or tool_call.name != "submit_irt_judgments":
-                raise RuntimeError("LLM did not return expected tool call for IRT judgment")
-
-            result = json.loads(tool_call.arguments)
-            llm_judgments = result.get("judgments", [])
-        finally:
-            if judgment_thread_id:
-                try:
-                    await self.oaw.delete_thread_by_id(judgment_thread_id)
-                except Exception:
-                    pass
-
-        # 既存判定削除 → 新規保存
-        judgment_service = IRTResponseJudgmentService(db)
-        judgment_service.delete_judgments_for_session(session_id)
-
-        valid_instance_ids = {inst.id for inst in detectable_instances}
-        db_judgments = []
-        for j in llm_judgments:
-            if j.get("instance_id") not in valid_instance_ids:
-                continue
-            db_judgments.append({
-                "session_id": session_id,
-                "instance_id": j["instance_id"],
-                "is_correct": j["is_correct"],
-                "judgment_method": "ai",
-                "confidence": j.get("confidence"),
-                "notes": j.get("reasoning"),
-                "evaluator_model": evaluator_model,
-                "evaluator_prompt_version": used_evaluator_prompt_version,
-                "votes_total": 1,
-                "votes_correct": 1 if j["is_correct"] else 0,
-            })
-
-        saved = judgment_service.bulk_create_judgments(db_judgments)
-        correct_count = sum(1 for j in saved if j.is_correct)
-
-        return {
-            "correct_count": correct_count,
-            "total_count": len(saved),
-        }
+        """Use the same evaluator as interactive sessions."""
+        from intent_assessment_service import ensure_assessment
+        result = await ensure_assessment(db, session_id, self.oaw, evaluator_model=evaluator_model,
+                                         prompt_version=evaluator_prompt_version)
+        return {**result, 'correct_count': result['collected_item_count'],
+                'total_count': result['total_item_count']}
 
     def get_status(self, batch_id: str) -> Optional[dict]:
         state = self.batches.get(batch_id)
