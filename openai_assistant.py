@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass, field
 from pydantic import BaseModel
 from modelUserDef import AssistantDef
+from chatconf import ChatConfigModel
 from openai import AsyncOpenAI, RateLimitError, APIStatusError, APIConnectionError, APITimeoutError
 from openai_etc import openai_get_apikey
 from typing import Optional, Any, List, Dict
@@ -124,7 +125,6 @@ class OpenAIAssistantWrapper():
         )
         self.rate_limit_info = RateLimitInfo()
         self._conversations: Dict[str, ConversationState] = {}
-        self._assistant_cache: Dict[str, dict] = {}  # assistant_id -> {model, instructions}
 
     @classmethod
     def _is_reasoning_model(cls, model_name: str) -> bool:
@@ -148,42 +148,15 @@ class OpenAIAssistantWrapper():
         self._conversations[conv_id] = ConversationState()
         return conv_id
 
-    async def get_assistant_info(self, assistant_id: str):
-        """
-        指定されたAssistant IDの情報を取得する
-        （Assistants API は廃止期間中も利用可能）
-        """
-        try:
-            logging.info(f"Retrieving assistant info for ID: {assistant_id}")
-            assistant = await self.client.beta.assistants.retrieve(assistant_id)
-
-            result = {
-                "model": assistant.model,
-                "name": assistant.name,
-                "description": assistant.description,
-                "instructions": assistant.instructions
-            }
-
-            logging.info(f"Successfully retrieved assistant info for {assistant_id}: model={assistant.model}, name={assistant.name}")
-            return result
-
-        except Exception as e:
-            logging.error(f"Failed to get assistant info for {assistant_id}: {e}", exc_info=True)
-            return None
-
-    async def _get_cached_assistant_info(self, assistant_id: str) -> dict:
-        """assistant_id のキャッシュを取得（なければ API で取得してキャッシュ）"""
-        if assistant_id not in self._assistant_cache:
-            info = await self.get_assistant_info(assistant_id)
-            if info:
-                self._assistant_cache[assistant_id] = info
-            else:
-                # フォールバック: 最低限のデフォルト
-                self._assistant_cache[assistant_id] = {
-                    "model": "gpt-4.1",
-                    "instructions": None,
-                }
-        return self._assistant_cache[assistant_id]
+    def resolve_model(self, role: str, model: Optional[str] = None) -> str:
+        """Use explicit batch/evaluation selection or the configured conversation model."""
+        if model is None:
+            field = {"患者": "patient_model", "保健師": "interviewer_model",
+                     "評価者": "debriefing_model"}[role]
+            model = getattr(self.config, field, ChatConfigModel.model_fields[field].default)
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError(f"Model is not configured for role: {role}")
+        return model.strip()
 
     async def delete_thread(self, assistant: AssistantDef):
         """会話状態を削除"""
@@ -341,6 +314,7 @@ class OpenAIAssistantWrapper():
                            max_output_tokens: Optional[int] = None,
                            truncation: str = "auto",
                            ) -> (Optional[str], Optional[Any]):
+            assistant.last_response_model = None
             if tools is None:
                 tools = []
 
@@ -359,17 +333,9 @@ class OpenAIAssistantWrapper():
                 conv = ConversationState()
                 self._conversations[assistant.thread_id] = conv
 
-            # instructions を決定: 明示的引数 > キャッシュ > None
+            # Prompts come from the existing DB prompt manager or explicit evaluation input.
             actual_instructions = instructions
-            if actual_instructions is None:
-                cached = await self._get_cached_assistant_info(assistant.assistant_id)
-                actual_instructions = cached.get("instructions")
-
-            # model を決定: 明示的引数 > キャッシュ
-            actual_model = model
-            if actual_model is None:
-                cached = await self._get_cached_assistant_info(assistant.assistant_id)
-                actual_model = cached.get("model", "gpt-4.1")
+            actual_model = self.resolve_model(assistant.role, model)
 
             # Reasoningモデル判定
             is_reasoning = self._is_reasoning_model(actual_model)
@@ -425,6 +391,7 @@ class OpenAIAssistantWrapper():
             for attempt in range(max_retries + 1):
                 try:
                     response = await self.client.responses.create(**api_params)
+                    assistant.last_response_model = response.model
 
                     # 会話状態を更新
                     conv.last_response_id = response.id

@@ -8,6 +8,7 @@ from modelHistory import MessageInfo
 from modelChat import ConversationEndChoices, MessageForwarded, ConversationContinueAccepted
 from modelRole import PatientRoleProvider
 from openai_assistant import OpenAIAssistantWrapper
+from modelSession import record_response_model
 import json
 from random import random
 from hashlib import sha1
@@ -244,6 +245,7 @@ class AIConversationManager:
                             session_id=self.session.session_id,
                             user_role=self.observer_user.role
                         )
+                        record_response_model(self.db, self.session.session_id, current_ai)
                         self.last_api_duration = time.time() - api_start_time
                     
                         if tool_call and tool_call.name == "end_conversation_and_start_debriefing":

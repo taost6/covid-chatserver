@@ -104,6 +104,22 @@ class IntentApiTest(unittest.TestCase):
         self.assertEqual(result.json()['confirmation_count'], 0)
         self.assertEqual(result.json()['score'], 1)
 
+    def test_retired_prompt_returns_actionable_503_without_model_call(self):
+        with self.factory() as db:
+            db.query(PromptTemplate).one().prompt_text = 'Call submit_irt_judgments'
+            db.commit()
+        with patch('intent_assessment_service.assess', AsyncMock()) as call:
+            for method, url, headers in (
+                ('get', '/v1/irt/session/test/result', {}),
+                ('post', '/v1/irt/judgments/evaluate/test', {'X-Admin-Key': 'test-key'}),
+            ):
+                result = getattr(self.client, method)(url, headers=headers)
+                self.assertEqual(result.status_code, 503, result.text)
+                self.assertIn('プロンプト管理', result.json()['detail'])
+            call.assert_not_awaited()
+        with self.factory() as db:
+            self.assertEqual(db.query(IRTAssessmentRun).count(), 0)
+
     def test_pending_is_exposed_as_null_score(self):
         self.raw['judgments'][0]['grade'] = 'pending'
         with patch('intent_assessment_service.assess', AsyncMock(return_value=self.raw)):

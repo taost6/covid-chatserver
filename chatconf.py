@@ -19,6 +19,10 @@ class ChatConfigModel(BaseModel):
     tz: str = "Asia/Tokyo"
     max_queue_size: int = 100
     assistants_storage: str
+    patient_model: str = "gpt-4.1"
+    interviewer_model: str = "gpt-4.1"
+    debriefing_model: str = "gpt-4.1"
+    evaluator_model: str = "gpt-5.4"
     gdrive_file_id: str
     gdrive_service_account: str
 

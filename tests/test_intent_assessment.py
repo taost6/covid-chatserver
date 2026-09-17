@@ -172,7 +172,7 @@ class PersistenceTest(unittest.IsolatedAsyncioTestCase):
         template.prompt_text = 'submit_irt_judgments を呼び出してください'
         self.db.commit()
         with patch('intent_assessment_service.assess', AsyncMock()) as call:
-            with self.assertRaisesRegex(ValueError, 'retired output format'):
+            with self.assertRaisesRegex(ValueError, '旧形式'):
                 await ensure_assessment(self.db, 's', None, evaluator_model='test-model')
             call.assert_not_awaited()
 

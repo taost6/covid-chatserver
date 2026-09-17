@@ -82,7 +82,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.patient_model || 'モデル情報取得エラー' }}
+                        {{ modelLabel(modelNames?.patient_model) }}
                       </span>
                     </td>
                     <td>
@@ -98,7 +98,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.interviewer_model || 'モデル情報取得エラー' }}
+                        {{ modelLabel(modelNames?.interviewer_model) }}
                       </span>
                     </td>
                     <td>
@@ -114,7 +114,7 @@
                         {{ sessionStore.userName }}
                       </span>
                       <span v-else class="text-medium-emphasis">
-                        {{ modelNames?.evaluator_model || 'モデル情報取得エラー' }}
+                        {{ modelLabel(modelNames?.evaluator_model) }}
                       </span>
                     </td>
                     <td>
@@ -349,6 +349,14 @@ const modelNames = ref<{
   interviewer_model?: string;
   evaluator_model?: string;
 } | null>(null);
+
+function modelLabel(model?: string): string {
+  if (!model) return 'モデル情報の記録なし';
+  if (model === 'UNKNOWN_MODEL' || model.endsWith('_ERROR')) {
+    return 'モデル情報の記録なし（取得に失敗）';
+  }
+  return model;
+}
 
 // Computed class for font size
 const fontSizeClass = computed(() => {

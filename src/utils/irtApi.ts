@@ -170,7 +170,14 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(url, config);
     if (!response.ok) {
       const errorText = await response.text();
-      throw new ApiError(response.status, `HTTP error! status: ${response.status}, text: ${errorText}`);
+      let detail: unknown;
+      try {
+        detail = JSON.parse(errorText).detail;
+      } catch {
+        // Non-JSON responses (e.g. from a proxy) still include their HTTP status.
+      }
+      throw new ApiError(response.status, typeof detail === 'string'
+        ? detail : `HTTP error! status: ${response.status}, text: ${errorText}`);
     }
     return await response.json();
   } catch (error) {

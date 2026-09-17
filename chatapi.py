@@ -20,7 +20,7 @@ from modelUserDef import *
 from modelHistory import *
 from modelRole import PatientRoleProvider
 import modelDatabase
-from modelSession import Session as SessionModel # New
+from modelSession import Session as SessionModel, record_response_model
 from modelPrompt import PromptTemplate, PromptTemplateService, initialize_default_prompts
 from modelIRT import IRTItemType, IRTItemTypeService, IRTPatientInstance, IRTPatientInstanceService, IRTResponseJudgment, IRTResponseJudgmentService
 from modelCBT import CBTAccessToken, CBTProgress, CBTService
@@ -29,7 +29,8 @@ from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 from irt_batch_runner import IRTBatchRunner
-from intent_assessment_service import ensure_assessment, get_saved, saved_result
+from intent_assessment_service import ensure_assessment, get_saved, saved_result, AssessmentConfigurationError
+from chatconf import ChatConfigModel
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -395,35 +396,6 @@ def get_current_prompt_versions(db: Session) -> dict:
         logger.error(f"Failed to get current prompt versions: {e}")
         return {"patient_version": None, "interviewer_version": None, "evaluator_version": None}
 
-async def get_assistant_model_info(assistant_id: str, oaw: OpenAIAssistantWrapper) -> str:
-    """指定されたAssistant IDのモデル情報を取得"""
-    if not assistant_id:
-        logger.error("Assistant ID is missing")
-        raise ValueError("Assistant ID is required")
-    
-    if not oaw:
-        logger.error("OpenAI Assistant Wrapper is not available")
-        raise ValueError("OpenAI Assistant Wrapper is required")
-    
-    try:
-        assistant_info = await oaw.get_assistant_info(assistant_id)
-        
-        if not assistant_info:
-            logger.error(f"No assistant info found for ID: {assistant_id}")
-            raise ValueError(f"Assistant info not found for ID: {assistant_id}")
-        
-        model_name = assistant_info.get("model")
-        if not model_name:
-            logger.error(f"No model name found in assistant info for ID: {assistant_id}")
-            raise ValueError(f"Model name not found for assistant ID: {assistant_id}")
-        
-        logger.info(f"Retrieved model name '{model_name}' for assistant ID: {assistant_id}")
-        return model_name
-        
-    except Exception as e:
-        logger.error(f"Failed to get assistant model info for ID {assistant_id}: {e}")
-        raise
-
 async def log_message(db: Session, session_id: str, user_name: str, patient_id: str, user_role: str, sender: str, message: str, logger, is_initial_message: bool = False, ai_role: str = None):
     if not modelDatabase.SessionLocal:
         return
@@ -550,21 +522,6 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
         assistant_id=debriefing_assistant_id,
         thread_id=debriefing_thread_id
     )
-
-    # 実際の評価AIモデル情報を取得してデータベースに保存
-    try:
-        evaluator_model = await get_assistant_model_info(debriefing_assistant_id, oaw)
-        # セッションレコードを更新
-        db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
-        if db_session:
-            db_session.evaluator_model = evaluator_model
-            db.commit()
-            logger.info(f"Updated session {session.session_id} with actual evaluator_model: {evaluator_model}")
-        else:
-            logger.error(f"Session {session.session_id} not found in database for evaluator model update")
-    except Exception as e:
-        logger.error(f"Failed to get/update evaluator model info for {debriefing_assistant_id}: {e}")
-        # Continue with debriefing even if model info retrieval fails
 
     # Function Calling用のツール定義
     debriefing_tool = {
@@ -809,6 +766,8 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             max_retries=5  # 評価者AIは重要なので、より多くのリトライを許可
         )
         
+        record_response_model(db, session.session_id, debriefing_assistant)
+
         # logger.info(f"[DEBRIEFING DEBUG] OpenAI API call completed")
         # logger.info(f"[DEBRIEFING DEBUG] Response text: {response_text}")
         # logger.info(f"[DEBRIEFING DEBUG] Tool call received: {tool_call is not None}")
@@ -953,6 +912,11 @@ def api(config):
     batch_runner = IRTBatchRunner(oaw, role_provider)
 
     app = FastAPI()
+
+    @app.exception_handler(AssessmentConfigurationError)
+    async def assessment_configuration_error(request: Request, exc: AssessmentConfigurationError):
+        logger.error("Assessment configuration error: %s", exc)
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     @app.on_event("startup")
     async def startup_event():
@@ -1586,10 +1550,8 @@ def api(config):
         """), {"ids": list(session_ids)})
         return {r.session_id: r for r in rows}
 
-    # IRT判定に使うモデル。評価者アシスタントの既定モデル(gpt-4.1)ではなく、
-    # バッチ判定（bulk_rejudge_300.py の EVALUATOR_MODEL）と同一に固定して
-    # アプリ内判定とバッチ判定の判定系を揃える。
-    IRT_JUDGMENT_MODEL = "gpt-5.4"
+    # Interactive grading uses the application configuration; batches select their model explicitly.
+    IRT_JUDGMENT_MODEL = getattr(config, "evaluator_model", ChatConfigModel.model_fields["evaluator_model"].default)
 
     async def _saved_or_evaluate_result(session_id: str, db: Session):
         """Use saved intent assessments; preserve old sessions until explicitly re-evaluated."""
@@ -2387,79 +2349,12 @@ def api(config):
                         # 現在のプロンプトバージョンを取得
                         prompt_versions = get_current_prompt_versions(db)
                         
-                        # モデル名を決定（人間が担当しない役割のみ）
-                        # まず、セッションに参加するAssistantを特定
                         assistant = _find_peer_ai(user)
-                        logger.info(f"Creating session for user role: {user.role}, assistant found: {assistant is not None}")
-                        if assistant:
-                            logger.info(f"Assistant details: role={assistant.role}, assistant_id={assistant.assistant_id}")
-                        
+                        # Actual model names are saved after successful Responses API calls.
                         patient_model = None
                         interviewer_model = None
                         evaluator_model = None
-                        
-                        if user.role == "患者":
-                            # 患者が人間の場合、保健師と評価者はAI
-                            logger.info("User is patient, getting interviewer model info")
-                            try:
-                                interviewer_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
-                            except Exception as e:
-                                logger.error(f"Failed to get interviewer model info: {e}")
-                                interviewer_model = "UNKNOWN_MODEL"
-                            # 評価者AIのモデル情報も取得
-                            try:
-                                with open("assistants.json", "r") as f:
-                                    assistants = json.load(f)
-                                if len(assistants) >= 3:
-                                    evaluator_assistant_id = assistants[2]
-                                    evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
-                                else:
-                                    evaluator_model = "EVALUATOR_CONFIG_ERROR"
-                            except Exception as e:
-                                logger.error(f"Failed to get evaluator model info: {e}")
-                                evaluator_model = "EVALUATOR_ERROR"
-                            logger.info(f"Set interviewer_model={interviewer_model}, evaluator_model={evaluator_model}")
-                        elif user.role == "保健師":
-                            # 保健師が人間の場合、患者と評価者はAI
-                            logger.info("User is interviewer, getting patient model info")
-                            try:
-                                patient_model = await get_assistant_model_info(assistant.assistant_id if assistant else None, oaw)
-                            except Exception as e:
-                                logger.error(f"Failed to get patient model info: {e}")
-                                patient_model = "UNKNOWN_MODEL"
-                            # 評価者AIのモデル情報も取得
-                            try:
-                                with open("assistants.json", "r") as f:
-                                    assistants = json.load(f)
-                                if len(assistants) >= 3:
-                                    evaluator_assistant_id = assistants[2]
-                                    evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
-                                else:
-                                    evaluator_model = "EVALUATOR_CONFIG_ERROR"
-                            except Exception as e:
-                                logger.error(f"Failed to get evaluator model info: {e}")
-                                evaluator_model = "EVALUATOR_ERROR"
-                            logger.info(f"Set patient_model={patient_model}, evaluator_model={evaluator_model}")
-                        elif user.role == "評価者":
-                            # 評価者が人間の場合、患者と保健師はAI
-                            logger.info("User is evaluator, getting model info for patient and interviewer")
-                            try:
-                                with open("assistants.json", "r") as f:
-                                    assistants = json.load(f)
-                                if len(assistants) >= 2:
-                                    patient_assistant_id = assistants[0]
-                                    interviewer_assistant_id = assistants[1]
-                                    patient_model = await get_assistant_model_info(patient_assistant_id, oaw)
-                                    interviewer_model = await get_assistant_model_info(interviewer_assistant_id, oaw)
-                                else:
-                                    patient_model = "PATIENT_CONFIG_ERROR"
-                                    interviewer_model = "INTERVIEWER_CONFIG_ERROR"
-                            except Exception as e:
-                                logger.error(f"Failed to get model info for evaluator session: {e}")
-                                patient_model = "PATIENT_ERROR"
-                                interviewer_model = "INTERVIEWER_ERROR"
-                            logger.info(f"Set patient_model={patient_model}, interviewer_model={interviewer_model}")
-                        
+
                         # バージョンも同様に、人間が担当しない役割のみ記録
                         patient_version = None if user.role == "患者" else prompt_versions.get('patient_version')
                         interviewer_version = None if user.role == "保健師" else prompt_versions.get('interviewer_version')
@@ -2594,35 +2489,11 @@ def api(config):
                         # 現在のプロンプトバージョンを取得
                         prompt_versions = get_current_prompt_versions(db)
                         
-                        # 傍聴者の場合は全てのロールがAI
-                        # 実際のAssistantモデル情報を取得
-                        try:
-                            # assistants.jsonから実際のAssistant IDを取得
-                            with open("assistants.json", "r") as f:
-                                assistants = json.load(f)
-                            
-                            if len(assistants) >= 3:
-                                patient_assistant_id = assistants[0]  # 1番目: 患者AI
-                                interviewer_assistant_id = assistants[1]  # 2番目: 保健師AI
-                                evaluator_assistant_id = assistants[2]  # 3番目: 評価者AI
-                                
-                                # 各AIの実際のモデル情報を取得
-                                patient_model = await get_assistant_model_info(patient_assistant_id, oaw)
-                                interviewer_model = await get_assistant_model_info(interviewer_assistant_id, oaw)
-                                evaluator_model = await get_assistant_model_info(evaluator_assistant_id, oaw)
-                                
-                                logger.info(f"Observer session models - patient: {patient_model}, interviewer: {interviewer_model}, evaluator: {evaluator_model}")
-                            else:
-                                logger.error("Not enough assistants defined in assistants.json for observer mode")
-                                patient_model = "ASSISTANT_CONFIG_ERROR"
-                                interviewer_model = "ASSISTANT_CONFIG_ERROR" 
-                                evaluator_model = "ASSISTANT_CONFIG_ERROR"
-                        except Exception as e:
-                            logger.error(f"Failed to get model info for observer session: {e}")
-                            patient_model = "MODEL_RETRIEVAL_ERROR"
-                            interviewer_model = "MODEL_RETRIEVAL_ERROR"
-                            evaluator_model = "MODEL_RETRIEVAL_ERROR"
-                        
+                        # Actual model names are saved by the conversation manager.
+                        patient_model = None
+                        interviewer_model = None
+                        evaluator_model = None
+
                         db_session = SessionModel(
                             session_id=session_id,
                             user_name=user.user_name,
@@ -2785,6 +2656,8 @@ def api(config):
 
                                 logger.info(f"Re-sending message to new thread {new_thread_id}")
                                 response_msg, tool_call = await oaw.send_message(peer, m.user_msg, max_retries=3)
+
+                            record_response_model(db, session.session_id, peer)
 
                             if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
                                 # LLMが会話の終了を判断した場合、クライアントに通知して確認を促す

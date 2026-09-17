@@ -7,6 +7,8 @@ class AssistantDef(BaseModel):
     assistant_id: str = Field(description="Assistant ID to be communicated.")
     thread_id: Optional[str] = Field(None,
             description="Thread Idenfifier of OpenAI API")
+    last_response_model: Optional[str] = Field(None, exclude=True,
+            description="Model returned by the latest successful Responses API call")
 
 class UserDef(BaseModel):
     user_id: str = Field(description="User ID")

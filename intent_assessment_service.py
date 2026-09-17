@@ -9,6 +9,10 @@ from modelUserDef import AssistantDef
 MAX_OUTPUT_TOKENS = 10000
 
 
+class AssessmentConfigurationError(ValueError):
+    """The selected managed evaluator cannot be used by the current grading API."""
+
+
 async def assess(oaw, payload):
     thread = await oaw.create_thread()
     try:
@@ -34,14 +38,16 @@ def row_dict(row):
 def assessment_settings(db, model, prompt_version=None):
     from modelPrompt import PromptTemplateService
     if not model:
-        raise ValueError('An evaluator model must be selected')
+        raise AssessmentConfigurationError('評価モデルが設定されていません。')
     service = PromptTemplateService(db)
     template = (service.get_template_by_version('evaluator', prompt_version)
                 if prompt_version is not None else service.get_active_template('evaluator'))
     if template is None:
-        raise ValueError('Evaluator prompt not found')
+        raise AssessmentConfigurationError('評価プロンプトが見つかりません。プロンプト管理で設定を確認してください。')
     if any(name in template.prompt_text for name in ('submit_irt_judgments', 'submit_debriefing_report')):
-        raise ValueError('Selected evaluator prompt uses a retired output format; activate the updated evaluator')
+        raise AssessmentConfigurationError(
+            f'評価プロンプトv{template.version}は旧形式です。'
+            'プロンプト管理で段階採点（○/△/×/保留）に対応した評価プロンプトを有効にしてください。')
     return dict(prompt_type=template.template_type, prompt_id=template.id,
                 prompt_version=template.version, instructions=template.prompt_text, model=model)
 
