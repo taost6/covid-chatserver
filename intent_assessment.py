@@ -112,19 +112,31 @@ def validate_assessment(raw, payload):
         if dialogue[mid]['text'][pos:].strip():
             raise ValueError('Act quotes do not cover message')
     for j in result.judgments:
-        for mid in j.question_message_ids:
-            if mid not in nurses or not kinds[mid].intersection({'question', 'confirmation'}):
-                raise ValueError('Question evidence is not a substantive question/confirmation')
-        for mid in j.answer_message_ids:
-            if mid not in dialogue or dialogue[mid]['role'] != '患者' or dialogue[mid]['initial']:
-                raise ValueError('Answer evidence is not a patient reply')
-        if j.grade == 'full':
-            if not j.question_message_ids or not j.answer_message_ids:
-                raise ValueError('Full requires question and answer evidence')
-            if not any(order[q] < order[a] for q in j.question_message_ids for a in j.answer_message_ids):
-                raise ValueError('Full requires a patient response following a question/confirmation')
-        if j.grade == 'incidental' and not j.answer_message_ids:
-            raise ValueError('Incidental requires patient evidence')
+        # A contradiction in one item's evidence is not a failure of every item.
+        # Preserve the act classification; never promote an acknowledgment to a question.
+        issues = []
+        questions = [mid for mid in j.question_message_ids
+                     if mid in nurses and kinds[mid].intersection({'question', 'confirmation'})]
+        answers = [mid for mid in j.answer_message_ids
+                   if mid in dialogue and dialogue[mid]['role'] == '患者' and not dialogue[mid]['initial']]
+        if questions != j.question_message_ids:
+            issues.append('質問・確認として分類された保健師発言に結び付かない根拠があります')
+        if answers != j.answer_message_ids:
+            issues.append('患者の回答に結び付かない根拠があります')
+        if not issues and j.grade == 'full':
+            if not questions or not answers:
+                issues.append('○判定に必要な質問と回答の根拠が揃っていません')
+            elif not any(order[q] < order[a] for q in questions for a in answers):
+                issues.append('質問・確認の後に対応する患者の回答がありません')
+        if not issues and j.grade == 'incidental' and not answers:
+            issues.append('△判定の根拠となる患者の回答がありません')
+        if issues:
+            j.reason = ('採点結果の根拠に不整合があるため保留：' + '；'.join(issues)
+                        + f'。元の判定：{j.grade}。元の理由：{j.reason}')
+            j.grade = 'pending'
+            j.confidence = 0.0
+            j.question_message_ids = questions
+            j.answer_message_ids = answers
     return result.model_dump()
 
 

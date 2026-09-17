@@ -128,6 +128,35 @@ class IntentApiTest(unittest.TestCase):
         self.assertIsNone(response.json()['score'])
         self.assertEqual(response.json()['pending_item_count'], 1)
 
+    def test_contradictory_question_evidence_returns_200_pending_and_preserves_other_items(self):
+        with self.factory() as db:
+            db.add(IRTPatientInstance(id=2, patient_id='60', item_type_code='T-3', instance_number=2,
+                                     description='別の項目', catalog_version=1))
+            db.commit()
+        self.raw['acts'][0]['kind'] = 'other'
+        self.raw['judgments'].append({**self.raw['judgments'][0], 'instance_id': 2,
+                                     'grade': 'incidental', 'question_message_ids': []})
+        with patch('intent_assessment_service.assess', AsyncMock(return_value=self.raw)) as call:
+            response = self.client.get('/v1/irt/session/test/result')
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()
+            self.assertEqual([i['grade'] for i in result['items']], ['pending', 'incidental'])
+            self.assertEqual(result['collected_item_count'], 0)
+            self.assertEqual(result['pending_item_count'], 1)
+            self.assertIsNone(result['score'])
+            again = self.client.get('/v1/irt/session/test/result')
+            self.assertEqual(again.json(), result)
+            call.assert_awaited_once()
+
+    def test_unusable_model_output_returns_detail_instead_of_500(self):
+        self.raw['acts'] = []
+        with patch('intent_assessment_service.assess', AsyncMock(return_value=self.raw)):
+            response = self.client.get('/v1/irt/session/test/result')
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertIn('発言分類', response.json()['detail'])
+        with self.factory() as db:
+            self.assertEqual(db.query(IRTAssessmentRun).count(), 0)
+
     def test_unknown_session_returns_404_without_model_call(self):
         with patch('intent_assessment_service.assess', AsyncMock()) as call:
             self.assertEqual(self.client.get('/v1/irt/session/unknown/result').status_code, 404)

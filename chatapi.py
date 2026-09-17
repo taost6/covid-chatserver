@@ -29,7 +29,7 @@ from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 from irt_batch_runner import IRTBatchRunner
-from intent_assessment_service import ensure_assessment, get_saved, saved_result, AssessmentConfigurationError
+from intent_assessment_service import ensure_assessment, get_saved, saved_result, AssessmentConfigurationError, AssessmentOutputError
 from chatconf import ChatConfigModel
 
 # Logger setup
@@ -917,6 +917,13 @@ def api(config):
     async def assessment_configuration_error(request: Request, exc: AssessmentConfigurationError):
         logger.error("Assessment configuration error: %s", exc)
         return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.exception_handler(AssessmentOutputError)
+    async def assessment_output_error(request: Request, exc: AssessmentOutputError):
+        # Log context without dumping model output or conversation text into server logs.
+        logger.error("Assessment output error: session=%s cause=%s detail=%s",
+                     request.path_params.get("session_id"), type(exc.__cause__).__name__, exc)
+        return JSONResponse(status_code=502, content={"detail": str(exc)})
 
     @app.on_event("startup")
     async def startup_event():

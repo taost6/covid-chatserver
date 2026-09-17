@@ -1,6 +1,7 @@
 """One assessment path for interactive requests and offline/batch pilots."""
 import asyncio
 import json
+import logging
 import uuid
 
 from intent_assessment import ASSESSMENT_SCHEMA_VERSION, TOOL, input_hash, make_input, summarize, validate_assessment
@@ -13,7 +14,12 @@ class AssessmentConfigurationError(ValueError):
     """The selected managed evaluator cannot be used by the current grading API."""
 
 
+class AssessmentOutputError(ValueError):
+    """The evaluator did not return an assessment that can be safely displayed."""
+
+
 async def assess(oaw, payload):
+    """Return original model output; validation belongs to the shared aggregation path."""
     thread = await oaw.create_thread()
     try:
         assistant = AssistantDef(user_id=str(uuid.uuid4()), role='評価者',
@@ -25,8 +31,11 @@ async def assess(oaw, payload):
                                          tool_choice='required', max_retries=0,
                                          max_output_tokens=MAX_OUTPUT_TOKENS, truncation='disabled')
         if call is None or call.name != TOOL['name']:
-            raise ValueError('No intent assessment returned')
-        return validate_assessment(json.loads(call.arguments), payload)
+            raise AssessmentOutputError('評価AIから採点結果を取得できませんでした。結果は保存されていません。')
+        try:
+            return json.loads(call.arguments)
+        except json.JSONDecodeError as exc:
+            raise AssessmentOutputError('評価AIの応答が不完全なJSON形式のため読み取れませんでした。結果は保存されていません。') from exc
     finally:
         await oaw.delete_thread_by_id(thread)
 
@@ -72,7 +81,9 @@ def get_saved(db, session_id):
 
 
 def saved_result(run):
-    return summarize(json.loads(run.result_json), json.loads(run.input_json))
+    document = json.loads(run.result_json)
+    # Older rows contain the assessment directly. New rows also retain the unmodified model output.
+    return summarize(document.get('assessment', document), json.loads(run.input_json))
 
 
 async def ensure_assessment(db, session_id, oaw, evaluator_model=None, prompt_version=None, force=False):
@@ -100,11 +111,18 @@ async def ensure_assessment(db, session_id, oaw, evaluator_model=None, prompt_ve
     payload = load_input(db, session_id)
     payload['assessment'] = assessment_settings(db, evaluator_model, prompt_version)
     raw = await assess(oaw, payload)
-    raw = validate_assessment(raw, payload)
+    try:
+        validated = validate_assessment(raw, payload)
+    except ValueError as exc:
+        raise AssessmentOutputError(
+            '評価AIの応答に項目の欠落や発言分類の不整合があり、採点結果を確定できませんでした。結果は保存されていません。') from exc
+    changed = [j['instance_id'] for j, original in zip(validated['judgments'], raw['judgments']) if j != original]
+    if changed:
+        logging.warning('Assessment evidence held pending: session=%s item_ids=%s', session_id, changed)
     run = IRTAssessmentRun(id=str(uuid.uuid4()), session_id=session_id, rubric_version=ASSESSMENT_SCHEMA_VERSION,
                            evaluator_model=evaluator_model, input_hash=input_hash(payload),
                            input_json=json.dumps(payload, ensure_ascii=False),
-                           result_json=json.dumps(raw, ensure_ascii=False))
+                           result_json=json.dumps(dict(assessment=validated, model_output=raw), ensure_ascii=False))
     db.add(run)
     db.commit()
-    return summarize(raw, payload)
+    return summarize(validated, payload)
