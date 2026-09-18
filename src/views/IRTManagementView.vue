@@ -435,8 +435,7 @@
                             </v-chip>
                           </template>
                           <template #item.score="{ item }">
-                            <span v-if="item.pending_item_count">保留 {{ item.pending_item_count }} 項目（聴取率未確定）</span>
-                            <span v-else-if="item.correct_count != null">
+                            <span v-if="item.correct_count != null">
                               {{ item.correct_count }}/{{ item.total_count }}
                               ({{ item.total_count > 0 ? Math.round(item.correct_count / item.total_count * 100) : 0 }}%)
                             </span>

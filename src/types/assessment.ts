@@ -1,4 +1,4 @@
-export type AssessmentGrade = 'full' | 'incidental' | 'missing' | 'pending';
+export type AssessmentGrade = 'full' | 'incidental' | 'missing';
 export interface AssessmentMetrics {
   assessment_version?: string | null;
   evaluator_prompt_version?: number | null;
@@ -7,7 +7,6 @@ export interface AssessmentMetrics {
   initial_message_count?: number | null;
   incidental_item_count?: number | null;
   missing_item_count?: number | null;
-  pending_item_count?: number | null;
   confirmation_count?: number | null;
   explanation_count?: number | null;
   other_act_count?: number | null;
@@ -21,5 +20,5 @@ export interface AssessmentEvidence {
 }
 export const gradeLabel = (grade?: string | null, collected = false): string => ({
   full: '○ 意図を持った聴取', incidental: '△ 情報の出現のみ',
-  missing: '× 未聴取', pending: '保留',
+  missing: '× 未聴取',
 }[grade ?? ''] ?? (collected ? '旧：聴取済み' : '旧：未聴取'));

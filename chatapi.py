@@ -45,7 +45,6 @@ class AssessmentMetrics(BaseModel):
     assessed_item_count: Optional[int] = None
     incidental_item_count: Optional[int] = None
     missing_item_count: Optional[int] = None
-    pending_item_count: Optional[int] = None
     confirmation_count: Optional[int] = None
     explanation_count: Optional[int] = None
     other_act_count: Optional[int] = None
@@ -1978,7 +1977,7 @@ def api(config):
     class CBTResultResponse(AssessmentMetrics):
         progress_id: int
         patient_id: str
-        score: Optional[float]          # 保留がある場合は未確定
+        score: Optional[float]
         total_item_count: int
         collected_item_count: int
         items: List[CBTResultItem]       # 全項目（リスク降順）

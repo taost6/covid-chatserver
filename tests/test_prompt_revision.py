@@ -89,6 +89,20 @@ class PromptRevisionTest(unittest.TestCase):
             register(self.db, revision, True)
         self.assertIsNotNone(PromptTemplateService(self.db).get_active_template(revision['source_type']))
 
+    def test_three_grade_revision_uses_same_evaluator_and_preserves_v13(self):
+        revision = json.loads((Path(__file__).resolve().parents[1] /
+            'prompt_migrations/evaluator_three_grades_20260917.json').read_text(encoding='utf-8'))
+        self.db.add(PromptTemplate(template_type='evaluator', version=13,
+            prompt_text=revision['expected_prompt_text'], message_text=revision['expected_message_text'], is_active=True))
+        self.db.commit()
+        result = register(self.db, revision, True)
+        self.assertEqual(result['version'], 14)
+        service = PromptTemplateService(self.db)
+        self.assertEqual(service.get_template_by_version('evaluator', 13).prompt_text, revision['expected_prompt_text'])
+        self.assertEqual(service.get_active_template('evaluator').prompt_text, revision['prompt_text'])
+        self.assertIn('三種類だけ', service.get_active_template('evaluator').prompt_text)
+        self.assertEqual(register(self.db, revision, True)['status'], 'already_applied')
+
 
 if __name__ == '__main__':
     unittest.main()

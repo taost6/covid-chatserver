@@ -90,7 +90,7 @@ class IntentApiTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.json()['items'][0]['grade'], 'full')
             again = self.client.get('/v1/irt/session/test/result')
-            self.assertEqual(again.json()['assessment_version'], 'intent-1')
+            self.assertEqual(again.json()['assessment_version'], 'intent-2')
             self.assertEqual(call.await_count, 1)
         with self.factory() as db:
             self.assertFalse(db.query(IRTResponseJudgment).one().is_correct)
@@ -120,15 +120,7 @@ class IntentApiTest(unittest.TestCase):
         with self.factory() as db:
             self.assertEqual(db.query(IRTAssessmentRun).count(), 0)
 
-    def test_pending_is_exposed_as_null_score(self):
-        self.raw['judgments'][0]['grade'] = 'pending'
-        with patch('intent_assessment_service.assess', AsyncMock(return_value=self.raw)):
-            response = self.client.get('/v1/irt/session/test/result')
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertIsNone(response.json()['score'])
-        self.assertEqual(response.json()['pending_item_count'], 1)
-
-    def test_contradictory_question_evidence_returns_200_pending_and_preserves_other_items(self):
+    def test_contradictory_question_evidence_returns_three_grades_and_preserves_other_items(self):
         with self.factory() as db:
             db.add(IRTPatientInstance(id=2, patient_id='60', item_type_code='T-3', instance_number=2,
                                      description='別の項目', catalog_version=1))
@@ -140,10 +132,10 @@ class IntentApiTest(unittest.TestCase):
             response = self.client.get('/v1/irt/session/test/result')
             self.assertEqual(response.status_code, 200, response.text)
             result = response.json()
-            self.assertEqual([i['grade'] for i in result['items']], ['pending', 'incidental'])
+            self.assertEqual([i['grade'] for i in result['items']], ['incidental', 'incidental'])
             self.assertEqual(result['collected_item_count'], 0)
-            self.assertEqual(result['pending_item_count'], 1)
-            self.assertIsNone(result['score'])
+            self.assertNotIn('pending_item_count', result)
+            self.assertEqual(result['score'], 0)
             again = self.client.get('/v1/irt/session/test/result')
             self.assertEqual(again.json(), result)
             call.assert_awaited_once()

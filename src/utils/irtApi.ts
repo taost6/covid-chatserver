@@ -66,7 +66,6 @@ export interface BatchResultEntry {
   run_number: number;
   status: string;
   correct_count: number | null;
-  pending_item_count?: number;
   total_count: number | null;
   error: string | null;
 }

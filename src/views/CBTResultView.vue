@@ -28,7 +28,7 @@
                 {{ result.score == null ? '—' : (result.score * 100).toFixed(1) }}<span class="text-h6">%</span>
               </div>
               <div class="text-caption text-grey mt-1">
-                {{ result.assessment_version ? '○の項目数 ÷ 対象項目数（保留時は未確定）' : '旧判定の聴取項目数 ÷ 全項目数' }}
+                {{ result.assessment_version ? '○の項目数 ÷ 対象項目数' : '旧判定の聴取項目数 ÷ 全項目数' }}
               </div>
             </div>
             <v-divider vertical class="d-none d-sm-flex" />
@@ -123,7 +123,7 @@ const scoreColorClass = computed(() => {
 const missedHighRisk = computed(() => {
   if (!result.value) return [];
   return result.value.items
-    .filter((it) => !it.collected && it.grade !== 'pending' && (it.risk_score ?? 0) >= 0.5)
+    .filter((it) => !it.collected && (it.risk_score ?? 0) >= 0.5)
     .slice(0, 10);
 });
 

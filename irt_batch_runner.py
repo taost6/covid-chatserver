@@ -423,7 +423,6 @@ class IRTBatchRunner:
                     result_entry["phase"] = "completed"
                     result_entry["correct_count"] = judgment_result.get("correct_count", 0)
                     result_entry["total_count"] = judgment_result.get("total_count", 0)
-                    result_entry["pending_item_count"] = judgment_result.get("pending_item_count", 0)
                     state["completed"] += 1
 
                     logger.info(

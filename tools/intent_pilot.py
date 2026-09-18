@@ -76,7 +76,7 @@ async def run(args):
             append(dict(state='completed', input_hash=key, session_id=payload['session_id'],
                         reserved_usd=0, input=payload, result=raw, summary=summary))
             print(json.dumps(dict(session_id=payload['session_id'], grade_counts={k: summary[k] for k in
-                                  ('collected_item_count','incidental_item_count','missing_item_count','pending_item_count')})), flush=True)
+                                  ('collected_item_count','incidental_item_count','missing_item_count')})), flush=True)
         except Exception as exc:
             append(dict(state='failed', input_hash=key, session_id=payload['session_id'], reserved_usd=0,
                         error_type=type(exc).__name__, reason=str(exc) if isinstance(exc, ValueError) else 'Request failed'))

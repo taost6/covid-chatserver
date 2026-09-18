@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from intent_assessment import make_input, summarize, validate_assessment, input_hash
+from intent_assessment import make_input, summarize, validate_assessment, input_hash, TOOL
 from intent_assessment_service import ensure_assessment, saved_result, assessment_settings, assess, AssessmentOutputError
 from modelIRT import IRTAssessmentRun, IRTResponseJudgment, IRTPatientInstance, Base
 from modelSession import Session as SessionRow
@@ -44,28 +44,28 @@ class IntentValidationTest(unittest.TestCase):
         self.assertFalse(out['items'][0]['collected'])
         self.assertEqual(out['score'], 0)
 
-    def test_pending_does_not_silently_become_a_miss(self):
+    def test_new_output_schema_accepts_only_three_grades(self):
+        grades = TOOL['parameters']['$defs']['Judgment']['properties']['grade']['enum']
+        self.assertEqual(grades, ['full', 'incidental', 'missing'])
         payload, raw = fixture()
         raw['judgments'][0]['grade'] = 'pending'
-        out = summarize(raw, payload)
-        self.assertIsNone(out['score'])
-        self.assertEqual(out['assessed_item_count'], 0)
-        self.assertEqual(out['missing_item_count'], 0)
+        with self.assertRaises(ValueError):
+            validate_assessment(raw, payload)
 
     def test_evidence_constraints(self):
         payload, raw = fixture()
-        bad = [dict(question_message_ids=[]), dict(answer_message_ids=[]),
-               dict(answer_message_ids=[10]), dict(answer_message_ids=[11]),
-               dict(question_message_ids=[12]), dict(question_message_ids=[999]), dict(answer_message_ids=[999])]
-        for change in bad:
+        cases = [(dict(question_message_ids=[]), 'incidental'), (dict(answer_message_ids=[]), 'missing'),
+                 (dict(answer_message_ids=[10]), 'missing'), (dict(answer_message_ids=[11]), 'missing'),
+                 (dict(question_message_ids=[12]), 'incidental'), (dict(question_message_ids=[999]), 'incidental'),
+                 (dict(answer_message_ids=[999]), 'missing')]
+        for change, expected in cases:
             with self.subTest(change=change):
                 test = copy.deepcopy(raw)
                 test['judgments'][0].update(change)
                 result = summarize(test, payload)
-                self.assertEqual(result['items'][0]['grade'], 'pending')
-                self.assertIn('根拠に不整合', result['items'][0]['reason'])
+                self.assertEqual(result['items'][0]['grade'], expected)
                 self.assertEqual(result['collected_item_count'], 0)
-                self.assertIsNone(result['score'])
+                self.assertEqual(result['score'], 0)
         for change in (dict(grade='invented'), dict(confidence=2), dict(instance_id=999)):
             with self.subTest(change=change):
                 test = copy.deepcopy(raw)
@@ -93,7 +93,7 @@ class IntentValidationTest(unittest.TestCase):
         raw['judgments'].append({**raw['judgments'][0], 'instance_id': 2, 'grade': 'incidental',
                                  'question_message_ids': []})
         result = validate_assessment(raw, payload)
-        self.assertEqual([j['grade'] for j in result['judgments']], ['pending', 'incidental'])
+        self.assertEqual([j['grade'] for j in result['judgments']], ['incidental', 'incidental'])
         self.assertEqual(result['judgments'][0]['question_message_ids'], [])
         self.assertEqual(result['acts'][0]['kind'], 'other')
         self.assertEqual(raw['judgments'][0]['grade'], 'full')
@@ -104,21 +104,42 @@ class IntentValidationTest(unittest.TestCase):
         payload, raw = fixture()
         raw['acts'][0]['kind'] = 'explanation'
         result = summarize(raw, payload)
-        self.assertEqual(result['pending_item_count'], 1)
+        self.assertEqual(result['incidental_item_count'], 1)
         self.assertEqual(result['question_count'], 0)
         self.assertEqual(result['explanation_count'], 1)
 
-    def test_full_without_a_following_patient_reply_is_held_pending(self):
+    def test_full_without_a_following_patient_reply_becomes_incidental(self):
         payload, raw = fixture()
         payload['dialogue'] = [payload['dialogue'][0], payload['dialogue'][2], payload['dialogue'][1]]
         result = summarize(raw, payload)
-        self.assertEqual(result['pending_item_count'], 1)
+        self.assertEqual(result['incidental_item_count'], 1)
         self.assertEqual(result['collected_item_count'], 0)
 
-    def test_incidental_without_patient_evidence_is_held_pending(self):
+    def test_incidental_without_patient_evidence_becomes_missing(self):
         payload, raw = fixture()
         raw['judgments'][0].update(grade='incidental', answer_message_ids=[])
-        self.assertEqual(summarize(raw, payload)['pending_item_count'], 1)
+        self.assertEqual(summarize(raw, payload)['missing_item_count'], 1)
+
+    def test_extra_acknowledgment_does_not_change_a_supported_grade(self):
+        payload, raw = fixture()
+        payload['dialogue'].append(dict(id=13, role='保健師', text='続きをどうぞ。', initial=False))
+        raw['acts'].append(dict(message_id=13, kind='other', quote='続きをどうぞ。'))
+        for grade in ('full', 'incidental', 'missing'):
+            with self.subTest(grade=grade):
+                raw['judgments'][0].update(grade=grade, question_message_ids=[11, 13])
+                result = validate_assessment(raw, payload)
+                self.assertEqual(result['judgments'][0]['grade'], grade)
+                self.assertEqual(result['judgments'][0]['question_message_ids'], [11])
+
+    def test_missing_does_not_become_incidental_just_because_a_patient_replied(self):
+        payload, raw = fixture()
+        raw['acts'][0]['kind'] = 'other'
+        raw['judgments'][0].update(grade='missing', reason='必要な情報を得ていない')
+        result = summarize(raw, payload)
+        self.assertEqual(result['items'][0]['grade'], 'missing')
+        self.assertEqual(result['items'][0]['question_message_ids'], [])
+        self.assertEqual(result['missing_item_count'], 1)
+        self.assertEqual(result['score'], 0)
 
     def test_explanation_and_question_are_separate_acts(self):
         payload, raw = fixture()
@@ -189,7 +210,7 @@ class PersistenceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.query(IRTAssessmentRun).count(), 0)
         self.assertEqual(self.db.query(IRTResponseJudgment).count(), 1)
 
-    async def test_pending_correction_preserves_original_output_and_is_cached(self):
+    async def test_three_grade_correction_preserves_original_output_and_is_cached(self):
         payload, raw = fixture()
         raw['acts'][0]['kind'] = 'other'
         with patch('intent_assessment_service.assess', AsyncMock(return_value=raw)) as call:
@@ -197,18 +218,52 @@ class PersistenceTest(unittest.IsolatedAsyncioTestCase):
             second = await ensure_assessment(self.db, 's', None, evaluator_model='test-model')
             self.assertEqual(call.await_count, 1)
         self.assertEqual(first, second)
-        self.assertEqual(first['pending_item_count'], 1)
+        self.assertEqual(first['incidental_item_count'], 1)
         stored = json.loads(self.db.query(IRTAssessmentRun).one().result_json)
         self.assertEqual(stored['model_output'], raw)
         self.assertEqual(stored['model_output']['judgments'][0]['grade'], 'full')
-        self.assertEqual(stored['assessment']['judgments'][0]['grade'], 'pending')
+        self.assertEqual(stored['assessment']['judgments'][0]['grade'], 'incidental')
         self.assertEqual(self.db.query(IRTResponseJudgment).count(), 1)
 
     async def test_flat_historical_result_remains_readable(self):
         payload, raw = fixture()
         result = saved_result(SimpleNamespace(result_json=json.dumps(raw), input_json=json.dumps(payload)))
         self.assertEqual(result['collected_item_count'], 1)
-        self.assertEqual(result['pending_item_count'], 0)
+        self.assertNotIn('pending_item_count', result)
+
+    async def test_saved_v1_pending_uses_original_model_grade_without_reassessment(self):
+        payload, raw = fixture()
+        payload['schema_version'] = 'intent-1'
+        payload['assessment'] = assessment_settings(self.db, 'test-model')
+        raw['judgments'][0]['grade'] = 'missing'
+        raw['acts'][0]['kind'] = 'other'
+        previous = copy.deepcopy(raw)
+        previous['judgments'][0].update(grade='pending', question_message_ids=[], confidence=0.0)
+        document = json.dumps(dict(assessment=previous, model_output=raw))
+        run = IRTAssessmentRun(id='old-run', session_id='s', rubric_version='intent-1',
+                               evaluator_model='test-model', input_hash=input_hash(payload),
+                               input_json=json.dumps(payload), result_json=document)
+        self.db.add(run)
+        self.db.commit()
+        with patch('intent_assessment_service.assess', AsyncMock()) as call:
+            result = await ensure_assessment(self.db, 's', None, evaluator_model='test-model')
+            call.assert_not_awaited()
+        self.assertEqual(result['assessment_version'], 'intent-2')
+        self.assertEqual(result['items'][0]['grade'], 'missing')
+        self.assertEqual(result['score'], 0)
+        self.assertEqual(self.db.query(IRTAssessmentRun).count(), 1)
+        self.assertEqual(run.result_json, document)
+
+    async def test_old_uncertain_fact_is_not_assumed_to_have_been_obtained(self):
+        payload, raw = fixture()
+        payload['schema_version'] = 'intent-1'
+        raw['judgments'][0].update(grade='pending', reason='日付が曖昧で必要な事実が未確認')
+        stored = json.dumps(raw)
+        run = SimpleNamespace(result_json=stored, input_json=json.dumps(payload))
+        result = saved_result(run)
+        self.assertEqual(result['items'][0]['grade'], 'missing')
+        self.assertIn('旧評価', result['items'][0]['reason'])
+        self.assertEqual(run.result_json, stored)
 
     async def test_incomplete_classification_is_reported_without_saving(self):
         _, raw = fixture()

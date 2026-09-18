@@ -56,7 +56,7 @@ def assessment_settings(db, model, prompt_version=None):
     if any(name in template.prompt_text for name in ('submit_irt_judgments', 'submit_debriefing_report')):
         raise AssessmentConfigurationError(
             f'評価プロンプトv{template.version}は旧形式です。'
-            'プロンプト管理で段階採点（○/△/×/保留）に対応した評価プロンプトを有効にしてください。')
+            'プロンプト管理で三段階採点（○/△/×）に対応した評価プロンプトを有効にしてください。')
     return dict(prompt_type=template.template_type, prompt_id=template.id,
                 prompt_version=template.version, instructions=template.prompt_text, model=model)
 
@@ -76,14 +76,26 @@ def load_input(db, session_id):
 
 def get_saved(db, session_id):
     from modelIRT import IRTAssessmentRun
-    return db.query(IRTAssessmentRun).filter_by(session_id=session_id, rubric_version=ASSESSMENT_SCHEMA_VERSION).order_by(
+    # Reuse saved evidence across the three-grade migration instead of silently calling the LLM again.
+    return db.query(IRTAssessmentRun).filter(
+        IRTAssessmentRun.session_id == session_id,
+        IRTAssessmentRun.rubric_version.in_(['intent-1', ASSESSMENT_SCHEMA_VERSION])).order_by(
         IRTAssessmentRun.created_at.desc(), IRTAssessmentRun.id.desc()).first()
 
 
 def saved_result(run):
     document = json.loads(run.result_json)
-    # Older rows contain the assessment directly. New rows also retain the unmodified model output.
-    return summarize(document.get('assessment', document), json.loads(run.input_json))
+    # Restore the model's original grade, not a previous validator's automatic pending fallback.
+    raw = document.get('model_output', document.get('assessment', document))
+    payload = json.loads(run.input_json)
+    if payload.get('schema_version') == 'intent-1':
+        for judgment in raw['judgments']:
+            if judgment['grade'] == 'pending':
+                # An old uncertain result cannot establish the required fact. Do not invent evidence.
+                judgment['grade'] = 'missing'
+                judgment['confidence'] = 0.0
+                judgment['reason'] = '旧評価では項目に必要な事実を確認できていないため×。旧評価理由：' + judgment['reason']
+    return summarize(raw, payload)
 
 
 async def ensure_assessment(db, session_id, oaw, evaluator_model=None, prompt_version=None, force=False):
@@ -118,7 +130,7 @@ async def ensure_assessment(db, session_id, oaw, evaluator_model=None, prompt_ve
             '評価AIの応答に項目の欠落や発言分類の不整合があり、採点結果を確定できませんでした。結果は保存されていません。') from exc
     changed = [j['instance_id'] for j, original in zip(validated['judgments'], raw['judgments']) if j != original]
     if changed:
-        logging.warning('Assessment evidence held pending: session=%s item_ids=%s', session_id, changed)
+        logging.warning('Assessment evidence normalized: session=%s item_ids=%s', session_id, changed)
     run = IRTAssessmentRun(id=str(uuid.uuid4()), session_id=session_id, rubric_version=ASSESSMENT_SCHEMA_VERSION,
                            evaluator_model=evaluator_model, input_hash=input_hash(payload),
                            input_json=json.dumps(payload, ensure_ascii=False),
