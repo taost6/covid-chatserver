@@ -112,8 +112,10 @@ export interface PatientSessionStat {
   accuracy: number;
   message_count: number;
   nurse_turn_count: number;
-  question_count: number;
-  correct_per_10_questions: number | null;
+  question_count: number | null;
+  confirmation_count: number | null;
+  explanation_count: number | null;
+  other_act_count: number | null;
 }
 
 export interface IRTSessionResultItem extends AssessmentEvidence {
@@ -133,8 +135,6 @@ export interface IRTSessionResult extends AssessmentMetrics {
   items: IRTSessionResultItem[];
   message_count: number;
   nurse_turn_count: number;
-  question_count: number;
-  correct_per_10_questions: number | null;
 }
 
 export interface PatientCategoryStat {

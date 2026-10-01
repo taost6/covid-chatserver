@@ -29,7 +29,7 @@ from openai import NotFoundError
 from openai_assistant import OpenAIAssistantWrapper
 from ai_conversation_manager import AIConversationManager, get_id as ai_get_id
 from irt_batch_runner import IRTBatchRunner
-from intent_assessment_service import ensure_assessment, get_saved, saved_result, AssessmentConfigurationError, AssessmentOutputError
+from intent_assessment_service import ensure_assessment, get_saved, saved_result, saved_act_counts, AssessmentConfigurationError, AssessmentOutputError
 from chatconf import ChatConfigModel
 
 # Logger setup
@@ -45,10 +45,11 @@ class AssessmentMetrics(BaseModel):
     assessed_item_count: Optional[int] = None
     incidental_item_count: Optional[int] = None
     missing_item_count: Optional[int] = None
+    # 保健師発話の意味単位をLLMが分類した件数。新採点が未保存のセッションは None（未判定）
+    question_count: Optional[int] = None
     confirmation_count: Optional[int] = None
     explanation_count: Optional[int] = None
     other_act_count: Optional[int] = None
-    legacy_question_mark_count: Optional[int] = None
     acts: Optional[List[dict]] = None
     interview_date: Optional[str] = None
 
@@ -351,11 +352,13 @@ class PatientSessionStat(BaseModel):
     correct_count: int
     total_count: int
     accuracy: float
-    # 対話量・質問数と、それによる正規化指標（人間とAIの効率比較用）
+    # 対話量と、保健師発話の内訳（LLM分類。新採点が未保存なら None＝未判定）
     message_count: int = 0            # 対話メッセージ総数（保健師+患者、初期メッセージ除く）
     nurse_turn_count: int = 0         # 保健師の発話数
-    question_count: int = 0           # 保健師発話中の質問数（疑問符の出現数）
-    correct_per_10_questions: Optional[float] = None  # 質問10回あたりの正答数
+    question_count: Optional[int] = None
+    confirmation_count: Optional[int] = None
+    explanation_count: Optional[int] = None
+    other_act_count: Optional[int] = None
 
 class PatientCategoryStat(BaseModel):
     category: str
@@ -1531,7 +1534,8 @@ def api(config):
     # --- IRT Judgment API ---
 
     def _get_dialogue_metrics(db: Session, session_ids: list) -> dict:
-        """セッションごとの対話量・保健師発話数・質問数（疑問符の出現数）を一括集計する。
+        """セッションごとの対話量・保健師発話数を一括集計する。
+        質問・確認・説明の内訳は文字列から数えず、保存済みのLLM分類（saved_act_counts）を使う。
 
         保健師発話の判定: AI保健師は ai_role='保健師'、人間保健師は sender='User' かつ
         user_role='保健師'。初期メッセージ・システムメッセージは除外。
@@ -1543,11 +1547,7 @@ def api(config):
         rows = db.execute(sql_text(f"""
             SELECT session_id,
                    count(*) AS total_msgs,
-                   count(*) FILTER (WHERE {nurse_cond}) AS nurse_msgs,
-                   COALESCE(sum(
-                       (length(message) - length(replace(message, '？', ''))) +
-                       (length(message) - length(replace(message, '?', '')))
-                   ) FILTER (WHERE {nurse_cond}), 0) AS questions
+                   count(*) FILTER (WHERE {nurse_cond}) AS nurse_msgs
             FROM {chat_table}
             WHERE session_id = ANY(:ids)
               AND sender IN ('User', 'Assistant')
@@ -1710,8 +1710,9 @@ def api(config):
             ).all()
             session_map = {s.session_id: s for s in session_records}
 
-        # セッション別統計（対話量・質問数の集計付き）
+        # セッション別統計（対話量と、保存済みLLM分類による発話内訳）
         dialogue_metrics = _get_dialogue_metrics(db, list(session_ids))
+        act_counts = saved_act_counts(db, list(session_ids))
         sessions_list = []
         for sid in sorted(session_ids):
             sj = judgments_by_session[sid]
@@ -1719,7 +1720,6 @@ def api(config):
             correct = sum(1 for j in sj if j.is_correct)
             total = len(sj)
             dm = dialogue_metrics.get(sid)
-            q_count = int(dm.questions) if dm else 0
             sessions_list.append(PatientSessionStat(
                 session_id=sid,
                 created_at=sr.created_at if sr else None,
@@ -1731,8 +1731,7 @@ def api(config):
                 accuracy=correct / total if total > 0 else 0.0,
                 message_count=int(dm.total_msgs) if dm else 0,
                 nurse_turn_count=int(dm.nurse_msgs) if dm else 0,
-                question_count=q_count,
-                correct_per_10_questions=round(correct / q_count * 10, 2) if q_count > 0 else None,
+                **act_counts.get(sid, {}),
             ))
 
         # 項目別統計
@@ -1981,11 +1980,8 @@ def api(config):
         total_item_count: int
         collected_item_count: int
         items: List[CBTResultItem]       # 全項目（リスク降順）
-        # 対話量・質問数と正規化指標
         message_count: int = 0
         nurse_turn_count: int = 0
-        question_count: int = 0
-        correct_per_10_questions: Optional[float] = None
 
     async def _compute_cbt_score(session_id: str, db: Session):
         """セッションのIRT判定を実行（または取得）し、項目聴取率を算出する。
@@ -2031,9 +2027,8 @@ def api(config):
         # リスク降順でソート（参考情報として高リスク項目を上位に）
         result_items.sort(key=lambda x: (x.risk_score is None, -(x.risk_score or 0)))
 
-        # 対話量・質問数（人間とAIの効率比較用の正規化指標）
+        # 旧判定のみのセッションには新採点が無いため、発話内訳は None（未判定）のまま返す
         dm = _get_dialogue_metrics(db, [session_id]).get(session_id)
-        q_count = int(dm.questions) if dm else 0
 
         return {
             "patient_id": patient_id,
@@ -2043,8 +2038,6 @@ def api(config):
             "items": result_items,
             "message_count": int(dm.total_msgs) if dm else 0,
             "nurse_turn_count": int(dm.nurse_msgs) if dm else 0,
-            "question_count": q_count,
-            "correct_per_10_questions": round(collected_count / q_count * 10, 2) if q_count > 0 else None,
         }
 
     class IRTSessionResultResponse(AssessmentMetrics):
@@ -2056,8 +2049,6 @@ def api(config):
         items: List[CBTResultItem]
         message_count: int = 0
         nurse_turn_count: int = 0
-        question_count: int = 0
-        correct_per_10_questions: Optional[float] = None
 
     @app.get("/v1/irt/session/{session_id}/result", response_model=IRTSessionResultResponse)
     async def get_irt_session_result(session_id: str, db: Session = Depends(get_db)):

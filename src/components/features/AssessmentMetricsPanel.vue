@@ -16,8 +16,8 @@
     <template v-else>
       <div>旧判定の聴取項目数：{{ result.collected_item_count }} / {{ result.total_item_count }}</div>
       <div>対話量（初期挨拶を除く）：{{ result.message_count }}</div>
-      <div>旧質問指標（疑問符の数）：{{ result.question_count }}</div>
-      <div class="text-caption text-grey">旧判定から、意図を持って聴取したかは判断できません。</div>
+      <div>質問・確認・説明：未判定</div>
+      <div class="text-caption text-grey">旧判定から、意図を持って聴取したかや発話の内訳は判断できません。</div>
     </template>
   </div>
 </template>
@@ -25,6 +25,6 @@
 import type { AssessmentMetrics } from '@/types/assessment';
 defineProps<{ result: AssessmentMetrics & {
   collected_item_count: number; total_item_count: number; message_count: number;
-  nurse_turn_count: number; question_count: number;
+  nurse_turn_count: number;
 } }>();
 </script>

@@ -7,6 +7,8 @@ export interface AssessmentMetrics {
   initial_message_count?: number | null;
   incidental_item_count?: number | null;
   missing_item_count?: number | null;
+  // LLMによる保健師発話の分類件数。新採点が未保存のセッションは null（未判定）
+  question_count?: number | null;
   confirmation_count?: number | null;
   explanation_count?: number | null;
   other_act_count?: number | null;

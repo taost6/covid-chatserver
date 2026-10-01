@@ -74,13 +74,31 @@ def load_input(db, session_id):
     return make_input(row_dict(session), [row_dict(i) for i in items], [row_dict(l) for l in logs], context)
 
 
-def get_saved(db, session_id):
+ACT_COUNT_KEYS = ('question_count', 'confirmation_count', 'explanation_count', 'other_act_count')
+
+
+def _saved_runs(db, session_ids):
     from modelIRT import IRTAssessmentRun
     # Reuse saved evidence across the three-grade migration instead of silently calling the LLM again.
     return db.query(IRTAssessmentRun).filter(
-        IRTAssessmentRun.session_id == session_id,
+        IRTAssessmentRun.session_id.in_(session_ids),
         IRTAssessmentRun.rubric_version.in_(['intent-1', ASSESSMENT_SCHEMA_VERSION])).order_by(
-        IRTAssessmentRun.created_at.desc(), IRTAssessmentRun.id.desc()).first()
+        IRTAssessmentRun.created_at.desc(), IRTAssessmentRun.id.desc())
+
+
+def get_saved(db, session_id):
+    return _saved_runs(db, [session_id]).first()
+
+
+def saved_act_counts(db, session_ids):
+    """LLM-classified act counts from each session's latest saved assessment; never calls the LLM.
+    Sessions without a saved assessment are absent (unclassified)."""
+    counts = {}
+    for run in _saved_runs(db, list(session_ids)):
+        if run.session_id not in counts:
+            result = saved_result(run)
+            counts[run.session_id] = {k: result[k] for k in ACT_COUNT_KEYS}
+    return counts
 
 
 def saved_result(run):

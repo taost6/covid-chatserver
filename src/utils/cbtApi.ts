@@ -46,8 +46,6 @@ export interface CBTResult extends AssessmentMetrics {
   items: CBTResultItem[];
   message_count: number;
   nurse_turn_count: number;
-  question_count: number;
-  correct_per_10_questions: number | null;
 }
 
 export interface CBTAdminToken {

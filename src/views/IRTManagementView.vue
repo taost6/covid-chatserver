@@ -738,8 +738,9 @@
                               {{ item.user_name || '人間' }}（人間）
                             </v-chip>
                           </template>
-                          <template #item.correct_per_10_questions="{ item }">
-                            {{ item.correct_per_10_questions != null ? item.correct_per_10_questions.toFixed(2) : '-' }}
+                          <template v-for="key in actCountKeys" :key="key" #[`item.${key}`]="{ item }">
+                            <span v-if="item[key] != null">{{ item[key] }}</span>
+                            <span v-else class="text-grey">未判定</span>
                           </template>
                           <template #item.accuracy="{ item }">
                             <div class="d-flex align-center" style="min-width:140px">
@@ -1498,10 +1499,13 @@ const sessionCompareHeaders = [
   { title: '保健師', key: 'nurse_model', width: '130px' },
   { title: '患者モデル', key: 'patient_model', width: '130px' },
   { title: '対話量', key: 'message_count', width: '80px' },
-  { title: '質問数', key: 'question_count', width: '80px' },
-  { title: '正答/10質問', key: 'correct_per_10_questions', width: '105px' },
+  // 保健師発話の意味単位をLLMが分類した件数（新採点が未保存のセッションは「未判定」）
+  { title: '質問', key: 'question_count', width: '70px' },
+  { title: '確認', key: 'confirmation_count', width: '70px' },
+  { title: '説明', key: 'explanation_count', width: '70px' },
   { title: '正答率', key: 'accuracy', width: '180px' },
 ];
+const actCountKeys = ['question_count', 'confirmation_count', 'explanation_count'] as const;
 
 const loadPatientStats = async () => {
   if (!statsPatientId.value) return;

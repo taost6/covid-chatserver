@@ -33,7 +33,8 @@ class IntentValidationTest(unittest.TestCase):
         out = summarize(raw, payload)
         self.assertEqual(out['score'], 1)
         self.assertEqual((out['display_message_count'], out['message_count']), (3, 2))
-        self.assertEqual((out['question_count'], out['legacy_question_mark_count']), (1, 0))
+        self.assertEqual(out['question_count'], 1)
+        self.assertNotIn('legacy_question_mark_count', out)
 
     def test_incidental_is_distinct_from_missing_and_not_correct(self):
         payload, raw = fixture()

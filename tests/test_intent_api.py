@@ -59,7 +59,7 @@ class IntentApiTest(unittest.TestCase):
         def compatible_execute(db, statement, *args, **kwargs):
             # The existing history metrics query uses PostgreSQL ANY/FILTER.
             if isinstance(statement, TextClause) and 'ANY(:ids)' in str(statement):
-                return [SimpleNamespace(session_id='test', total_msgs=2, nurse_msgs=1, questions=1)]
+                return [SimpleNamespace(session_id='test', total_msgs=2, nurse_msgs=1)]
             return execute(db, statement, *args, **kwargs)
         with patch.object(SQLSession, 'execute', compatible_execute), \
                 patch('intent_assessment_service.assess', AsyncMock()) as call:
@@ -67,6 +67,8 @@ class IntentApiTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             self.assertIsNone(response.json()['assessment_version'])
             self.assertTrue(response.json()['items'][0]['collected'])
+            # 旧判定のみのセッションは疑問符で数えず、内訳は未判定
+            self.assertIsNone(response.json()['question_count'])
             call.assert_not_awaited()
 
     def test_batch_no_longer_accepts_a_legacy_mode_switch(self):
@@ -103,6 +105,18 @@ class IntentApiTest(unittest.TestCase):
         self.assertEqual(result.json()['question_count'], 1)
         self.assertEqual(result.json()['confirmation_count'], 0)
         self.assertEqual(result.json()['score'], 1)
+
+    def test_act_counts_come_only_from_saved_llm_classification(self):
+        from intent_assessment_service import saved_act_counts
+        with self.factory() as db:
+            self.assertEqual(saved_act_counts(db, ['test']), {})
+        with patch('intent_assessment_service.assess', AsyncMock(return_value=self.raw)):
+            self.client.get('/v1/irt/session/test/result')
+        with patch('intent_assessment_service.assess', AsyncMock()) as call, self.factory() as db:
+            counts = saved_act_counts(db, ['test', 'never-assessed'])
+            call.assert_not_awaited()
+        self.assertEqual(counts, {'test': dict(question_count=1, confirmation_count=0,
+                                               explanation_count=0, other_act_count=0)})
 
     def test_retired_prompt_returns_actionable_503_without_model_call(self):
         with self.factory() as db:

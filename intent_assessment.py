@@ -156,5 +156,4 @@ def summarize(raw, payload):
                 initial_message_count=display-len(substantive), nurse_turn_count=len(nurses),
                 question_count=acts['question'], confirmation_count=acts['confirmation'],
                 explanation_count=acts['explanation'], other_act_count=acts['other'],
-                legacy_question_mark_count=sum(m['text'].count('?')+m['text'].count('？') for m in nurses),
-                correct_per_10_questions=None, acts=raw['acts'], interview_date=payload['interview_date'])
+                acts=raw['acts'], interview_date=payload['interview_date'])

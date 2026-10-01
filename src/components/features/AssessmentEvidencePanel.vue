@@ -21,7 +21,7 @@
 import { CSVExporter } from '@/utils/csvExport';
 import { gradeLabel, type AssessmentMetrics, type AssessmentEvidence } from '@/types/assessment';
 const props = defineProps<{ result: AssessmentMetrics & {
-  patient_id: string; score: number | null; message_count: number; question_count: number;
+  patient_id: string; score: number | null; message_count: number;
   items: (AssessmentEvidence & { instance_id: number; item_type_code: string; description: string | null; collected: boolean })[];
 } }>();
 const download = () => {
