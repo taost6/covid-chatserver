@@ -4,7 +4,8 @@ import json
 import logging
 import uuid
 
-from intent_assessment import ASSESSMENT_SCHEMA_VERSION, TOOL, input_hash, make_input, summarize, validate_assessment
+from intent_assessment import (ASSESSMENT_SCHEMA_VERSION, TOOL, disclosed_context, input_hash, make_input,
+                               summarize, validate_assessment)
 from modelUserDef import AssistantDef
 
 MAX_OUTPUT_TOKENS = 10000
@@ -67,11 +68,10 @@ def load_input(db, session_id):
     from modelIRT import IRTPatientInstance
     session = db.query(Session).filter_by(session_id=session_id).one()
     items = db.query(IRTPatientInstance).filter_by(patient_id=session.patient_id).all()
-    logs = db.query(ChatLog).filter_by(session_id=session_id).order_by(ChatLog.created_at, ChatLog.id).all()
+    logs = [row_dict(l) for l in db.query(ChatLog).filter_by(session_id=session_id).order_by(
+        ChatLog.created_at, ChatLog.id).all()]
     # Original injected scenario, not today's mutable Drive data. Never use evaluation reports as context.
-    context = '\n'.join(l.message for l in logs if l.sender == 'System' and l.is_initial_message
-                        and '調査開始時点で開示されている情報:' in l.message)
-    return make_input(row_dict(session), [row_dict(i) for i in items], [row_dict(l) for l in logs], context)
+    return make_input(row_dict(session), [row_dict(i) for i in items], logs, disclosed_context(logs))
 
 
 ACT_COUNT_KEYS = ('question_count', 'confirmation_count', 'explanation_count', 'other_act_count')

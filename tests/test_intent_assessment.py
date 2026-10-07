@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from intent_assessment import make_input, summarize, validate_assessment, input_hash, TOOL
+from intent_assessment import make_input, summarize, validate_assessment, input_hash, TOOL, disclosed_context
 from intent_assessment_service import ensure_assessment, saved_result, assessment_settings, assess, AssessmentOutputError
 from modelIRT import IRTAssessmentRun, IRTResponseJudgment, IRTPatientInstance, Base
 from modelSession import Session as SessionRow
@@ -148,6 +148,19 @@ class IntentValidationTest(unittest.TestCase):
         raw['acts'].insert(0, dict(message_id=11, kind='explanation', quote='調査のため伺います。'))
         out = summarize(raw, payload)
         self.assertEqual((out['nurse_turn_count'], out['question_count'], out['explanation_count']), (1, 1, 1))
+
+    def test_disclosure_is_extracted_without_the_rest_of_the_scenario(self):
+        profile = ('本日は2022年04月20日です。\nプロフィール: 理学部3年生。\n感染日: 2022-04-17 00:00:00\n'
+                   '発症日: 2022-04-20 00:00:00\n調査開始時点で開示されている情報: 症状: 咽頭痛\n'
+                   '診断日: 2022-04-20\nワクチン接種状況: 2回目済\n')
+        logs = [dict(sender='System', is_initial_message=False, message=profile),
+                dict(sender='System', is_initial_message=False, message='【2022-04-17の行動履歴】\nバイト'),
+                dict(sender='User', is_initial_message=False, message='調査開始時点で開示されている情報: 偽')]
+        context = disclosed_context(logs)
+        self.assertEqual(context, '調査開始時点で開示されている情報: 症状: 咽頭痛\n'
+                                  '診断日: 2022-04-20\nワクチン接種状況: 2回目済')
+        self.assertNotIn('感染日', context)
+        self.assertEqual(disclosed_context(logs[1:]), '')
 
     def test_calendar_uses_scenario_date_not_execution_date(self):
         payload, _ = fixture()

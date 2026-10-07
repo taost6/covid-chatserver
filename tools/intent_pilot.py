@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dotenv import load_dotenv
-from intent_assessment import TOOL, input_hash, make_input, summarize
+from intent_assessment import TOOL, disclosed_context, input_hash, make_input, summarize
 from intent_assessment_service import assess, MAX_OUTPUT_TOKENS
 from openai_assistant import OpenAIAssistantWrapper
 
@@ -17,10 +17,8 @@ from openai_assistant import OpenAIAssistantWrapper
 def payloads(snapshot):
     for session in snapshot['sessions']:
         logs = [l for l in snapshot['logs'] if l['session_id'] == session['session_id']]
-        context = '\n'.join(l['message'] for l in logs if l['sender'] == 'System'
-                            and l['is_initial_message'] and '調査開始時点で開示されている情報:' in l['message'])
         items = [i for i in snapshot['items'] if i['patient_id'] == session['patient_id']]
-        yield make_input(session, items, logs, context)
+        yield make_input(session, items, logs, disclosed_context(logs))
 
 
 def cost_bound(payload):

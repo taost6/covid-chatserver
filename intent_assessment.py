@@ -49,6 +49,17 @@ def parse_day(value):
         return None
 
 
+DISCLOSURE_MARKER = '調査開始時点で開示されている情報:'
+
+
+def disclosed_context(logs):
+    """Only the start-of-investigation disclosure. It is the last field of the injected patient profile
+    (modelRole base_info); the rest of that log is the answer key and must never reach the evaluator.
+    Identified by content because stored profile logs are not flagged as initial messages."""
+    return '\n'.join(l['message'][l['message'].index(DISCLOSURE_MARKER):].strip() for l in logs
+                     if l['sender'] == 'System' and DISCLOSURE_MARKER in (l.get('message') or ''))
+
+
 def make_input(session, items, logs, knowledge_context=''):
     """Freeze only relevant, non-secret input; never substitute today's date."""
     day = parse_day(session.get('interview_date'))
