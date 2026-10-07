@@ -98,5 +98,33 @@ class BatchConversationEndTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(judge.check.await_count, 2)  # 患者の発言の後だけ判定する
 
 
+class ObserverConversationEndTest(unittest.IsolatedAsyncioTestCase):
+    async def test_observer_loop_sends_end_choices_when_judged_ended(self):
+        """傍聴者モードの会話ループが、終了判定で選択肢を送って止まる（2026-10-07 の UnboundLocalError の回帰）。"""
+        import logging
+        from ai_conversation_manager import AIConversationManager
+        from modelHistory import History, MessageInfo
+        from modelUserDef import AssistantDef
+        sent = []
+        ws = SimpleNamespace(send_json=AsyncMock(side_effect=lambda m: sent.append(m)))
+        judge = SimpleNamespace(check=AsyncMock(return_value=dict(ended=True)))
+        session = SimpleNamespace(session_id='s', skip_next_end_detection=False, conversation_end_judge=judge,
+                                  history=History(history=[MessageInfo(role='保健師', text='ご協力ありがとうございました。')]))
+        oaw = SimpleNamespace(send_message=AsyncMock(return_value=('ありがとうございました。', None)))
+        manager = AIConversationManager(session, SimpleNamespace(ws=ws, role='傍聴者'), oaw, None, None,
+                                        logging.getLogger('test'))
+        manager.nurse_ai = AssistantDef(user_id='n', role='保健師', assistant_id='a')
+        manager.patient_ai = AssistantDef(user_id='p', role='患者', assistant_id='b')
+        manager.initial_message_sent = True
+        manager.message_interval = 0
+        with patch('ai_conversation_manager.log_message', AsyncMock()), \
+                patch('ai_conversation_manager.record_response_model'):
+            manager.is_running = True
+            await manager._conversation_loop()
+        types = [m['msg_type'] for m in sent]
+        self.assertEqual(types, ['MessageForwarded', 'ConversationEndChoices'])
+        self.assertFalse(manager.is_running)
+
+
 if __name__ == '__main__':
     unittest.main()

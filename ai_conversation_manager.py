@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 from modelUserDef import UserDef, AssistantDef
 from modelHistory import MessageInfo
-from modelChat import ConversationEndChoices, MessageForwarded, ConversationContinueAccepted
+from modelChat import ConversationEndChoices, MessageForwarded, ConversationContinueAccepted, MessageRejected
 from modelRole import PatientRoleProvider
 from openai_assistant import OpenAIAssistantWrapper
 from modelSession import record_response_model
@@ -259,7 +259,6 @@ class AIConversationManager:
                             # end_conversation_and_start_debriefingが含まれる場合はメッセージを送信しない
                             if "end_conversation_and_start_debriefing" in response_msg.lower():
                                 # 会話終了選択肢を送信
-                                from modelChat import ConversationEndChoices
                                 message_data = ConversationEndChoices(session_id=self.session.session_id).model_dump()
                                 self.logger.info(f"Sending ConversationEndChoices (function call text): {message_data}")
                                 await self.observer_user.ws.send_json(message_data)
@@ -323,6 +322,13 @@ class AIConversationManager:
             self.logger.info("Conversation loop was cancelled")
         except Exception as e:
             self.logger.error(f"Error in conversation loop: {e}")
+            # 画面が無反応のまま止まらないよう、傍聴者にエラーを知らせる
+            try:
+                await self.observer_user.ws.send_json(MessageRejected(
+                    session_id=self.session.session_id,
+                    reason="AI同士の対話の処理でエラーが発生したため停止しました。").model_dump())
+            except Exception:
+                pass
         finally:
             self.is_running = False
     
