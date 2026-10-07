@@ -9,6 +9,7 @@ from modelChat import ConversationEndChoices, MessageForwarded, ConversationCont
 from modelRole import PatientRoleProvider
 from openai_assistant import OpenAIAssistantWrapper
 from modelSession import record_response_model
+from conversation_end_judge import judge_session_end
 import json
 from random import random
 from hashlib import sha1
@@ -237,10 +238,9 @@ class AIConversationManager:
                     if last_message and self.is_running:
                         # API呼び出し時間を測定
                         api_start_time = time.time()
-                        response_msg, tool_call = await self.oaw.send_message(
-                            current_ai, 
+                        response_msg, _ = await self.oaw.send_message(
+                            current_ai,
                             last_message,
-                            tools=[] if current_ai.role == "患者" else None,  # 患者AIはFunction Calling無効
                             user_ws=self.observer_user.ws,
                             session_id=self.session.session_id,
                             user_role=self.observer_user.role
@@ -248,14 +248,7 @@ class AIConversationManager:
                         record_response_model(self.db, self.session.session_id, current_ai)
                         self.last_api_duration = time.time() - api_start_time
                     
-                        if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
-                            # 対話終了の選択肢を送信
-                            from modelChat import ConversationEndChoices
-                            message_data = ConversationEndChoices(session_id=self.session.session_id).dict()
-                            self.logger.info(f"Sending ConversationEndChoices (tool call): {message_data}")
-                            await self.observer_user.ws.send_json(message_data)
-                            break
-                        elif response_msg and not response_msg.startswith("FAILED:"):
+                        if response_msg and not response_msg.startswith("FAILED:"):
                             # 停止シグナルを再チェック
                             if not self.is_running:
                                 break
@@ -297,55 +290,14 @@ class AIConversationManager:
                                 }
                                 await self.observer_user.ws.send_json(message_data)
                             
-                            # 会話終了検知処理（傍聴者モード用）- 患者AIの発言後のみ実行
-                            if self.session.conversation_end_detector and self.is_running and current_ai.role == "患者":
-                                try:
-                                    # AIの応答を検出器に追加
-                                    await self.session.conversation_end_detector.add_conversation_message(cleaned_msg, current_ai.role)
-                                    self.logger.debug(f"Added message to end detector: [{current_ai.role}] {cleaned_msg[:50]}...")
-                                    
-                                    # 会話継続直後は検出をスキップ
-                                    if self.session.skip_next_end_detection:
-                                        self.session.skip_next_end_detection = False  # フラグをリセット
-                                        self.logger.info("Skipping conversation end detection (continue request)")
-                                    else:
-                                        # 会話終了を検出（患者の発言後のみ）
-                                        self.logger.debug("Executing conversation end detection after patient response...")
-                                        end_detection_result = await self.session.conversation_end_detector.check_conversation_end()
-                                        self.logger.debug(f"End detection result: {end_detection_result}")
-                                        
-                                        if end_detection_result and end_detection_result.get("detected"):
-                                            confidence = end_detection_result.get("confidence", 0.0)
-                                            reason = end_detection_result.get("reason", "")
-                                            
-                                            # 確信度が0.95以上の場合に会話終了として扱う
-                                            confidence_threshold = 0.95
-                                            if confidence >= confidence_threshold:
-                                                self.logger.info(f"Conversation end detected by specialist AI (confidence: {confidence:.2f}): {reason}")
-                                                
-                                                # WebSocketで会話終了選択肢を通知
-                                                from modelChat import ConversationEndChoices
-                                                message_data = ConversationEndChoices(session_id=self.session.session_id).model_dump()
-                                                self.logger.info(f"Sending ConversationEndChoices to WebSocket: {message_data}")
-                                                await self.observer_user.ws.send_json(message_data)
-                                                
-                                                # 対話を正常終了状態に設定
-                                                self.is_running = False
-                                                self.logger.info("AI conversation stopped due to end detection")
-                                                return  # 対話を終了
-                                            else:
-                                                self.logger.info(f"Conversation end detected but confidence too low (confidence: {confidence:.2f} < {confidence_threshold}): {reason}")
-                                except Exception as e:
-                                    self.logger.error(f"Error during conversation end detection in observer mode: {e}")
-                                    # 検出エラーは会話を止めない
-                            elif self.session.conversation_end_detector and self.is_running and current_ai.role == "保健師":
-                                # 保健師AIの発言の場合は、検出器に追加するだけで終了判定は行わない
-                                try:
-                                    await self.session.conversation_end_detector.add_conversation_message(cleaned_msg, current_ai.role)
-                                    self.logger.debug(f"Added nurse message to end detector (no detection): [{current_ai.role}] {cleaned_msg[:50]}...")
-                                except Exception as e:
-                                    self.logger.error(f"Error adding nurse message to end detector: {e}")
-                            
+                            # 患者AIの発言後に会話終了を判定する（Jev）
+                            if self.is_running and current_ai.role == "患者" and await judge_session_end(self.session):
+                                message_data = ConversationEndChoices(session_id=self.session.session_id).model_dump()
+                                await self.observer_user.ws.send_json(message_data)
+                                self.is_running = False
+                                self.logger.info("AI conversation stopped by conversation end judgment")
+                                return
+
                             # 話者を切り替え
                             self.current_turn = "patient" if self.current_turn == "nurse" else "nurse"
                 

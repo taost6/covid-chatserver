@@ -23,6 +23,9 @@ class ChatConfigModel(BaseModel):
     interviewer_model: str = "gpt-6.1-sol"
     debriefing_model: str = "gpt-6.1-sol"
     evaluator_model: str = "gpt-6.1-sol"
+    # 会話終了判定（TypeSafe Jev）。研究用の判定なので版を固定する。しきい値は2つの判定の両方に適用
+    end_judge_model: str = "jev-1.13.0"
+    end_judge_threshold: float = 0.5
     gdrive_file_id: str
     gdrive_service_account: str
 

@@ -31,10 +31,12 @@ class HeadlessConversation:
     def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, db,
                  nurse_model: Optional[str] = None, patient_model: Optional[str] = None,
                  patient_prompt_version: Optional[int] = None,
-                 interviewer_prompt_version: Optional[int] = None):
+                 interviewer_prompt_version: Optional[int] = None,
+                 end_judge=None):
         self.oaw = oaw
         self.role_provider = role_provider
         self.db = db
+        self.end_judge = end_judge  # ConversationEndJudge（Jev）。None なら MAX_TURNS まで続ける
         self.nurse_model = nurse_model
         self.patient_model = patient_model
         self.patient_prompt_version = patient_prompt_version
@@ -117,21 +119,7 @@ class HeadlessConversation:
                 is_initial_message=False, ai_role="保健師"
             )
 
-            # 4. 対話ループ
-            # 保健師AI用の会話終了ツール定義
-            # フロー: 保健師が感謝の言葉+ツール呼び出しで終了を宣言
-            #       → 感謝テキストを患者AIに送信 → 患者が応答 → 終了
-            end_conversation_tool = {
-                "type": "function",
-                "name": "end_conversation_and_start_debriefing",
-                "description": "聞き取り調査が十分に完了したと判断した場合に呼び出す。"
-                               "感謝の言葉と一緒に呼び出すこと。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                }
-            }
-
+            # 4. 対話ループ（終了は患者AIの発言後に Jev で判定する）
             history: List[Dict[str, str]] = [
                 {"role": "患者", "text": initial_patient_message},
                 {"role": "保健師", "text": initial_nurse_message},
@@ -154,46 +142,9 @@ class HeadlessConversation:
                     break
 
                 current_model = self.patient_model if current_ai.role == "患者" else self.nurse_model
-                response_msg, tool_call = await self.oaw.send_message(
-                    current_ai, last_message,
-                    tools=[] if current_ai.role == "患者" else [end_conversation_tool],
-                    max_retries=5,
-                    model=current_model
+                response_msg, _ = await self.oaw.send_message(
+                    current_ai, last_message, tools=[], max_retries=5, model=current_model
                 )
-
-                if tool_call and tool_call.name == "end_conversation_and_start_debriefing":
-                    # 保健師AIが終了を判断した
-                    # 付随テキスト（感謝の言葉）があれば患者に送って応答を得る
-                    if response_msg and not response_msg.startswith("FAILED:"):
-                        cleaned = response_msg.strip()
-                        if len(cleaned) >= 3:
-                            history.append({"role": nurse_ai.role, "text": cleaned})
-                            await log_message(
-                                self.db, session_id, "AI", nurse_ai.assistant_id,
-                                "傍聴者", "Assistant", cleaned, logger,
-                                ai_role="保健師"
-                            )
-                            turn_count += 1
-
-                            # 患者AIに最後の応答機会を与える
-                            patient_response, _ = await self.oaw.send_message(
-                                patient_ai, cleaned, tools=[],
-                                max_retries=5, model=self.patient_model
-                            )
-                            if patient_response and not patient_response.startswith("FAILED:"):
-                                patient_cleaned = patient_response.strip()
-                                if len(patient_cleaned) >= 3:
-                                    history.append({"role": patient_ai.role, "text": patient_cleaned})
-                                    await log_message(
-                                        self.db, session_id, "AI", patient_ai.assistant_id,
-                                        "傍聴者", "Assistant", patient_cleaned, logger,
-                                        ai_role="患者"
-                                    )
-                                    turn_count += 1
-
-                    ended_by = "tool_call"
-                    logger.info(f"[Batch] Session {session_id}: conversation ended by nurse tool_call at turn {turn_count}")
-                    break
 
                 if response_msg and not response_msg.startswith("FAILED:"):
                     cleaned = response_msg.strip()
@@ -208,6 +159,13 @@ class HeadlessConversation:
                     )
                     turn_count += 1
                     current_turn = "patient" if current_turn == "nurse" else "nurse"
+
+                    if current_ai.role == "患者" and self.end_judge:
+                        judgment = await self.end_judge.check([(m["role"], m["text"]) for m in history])
+                        if judgment and judgment["ended"]:
+                            ended_by = "end_judge"
+                            logger.info(f"[Batch] Session {session_id}: conversation ended by end judgment at turn {turn_count}: {judgment}")
+                            break
                 else:
                     # API呼び出しがリトライ上限まで失敗した場合はセッションを失敗として扱う。
                     # ここで正常終了扱いにすると「挨拶のみの対話が completed になり全問不正解で
@@ -235,8 +193,9 @@ class HeadlessConversation:
 class IRTBatchRunner:
     """バッチ実行管理"""
 
-    def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider):
+    def __init__(self, oaw: OpenAIAssistantWrapper, role_provider: PatientRoleProvider, end_judge=None):
         self.oaw = oaw
+        self.end_judge = end_judge
         self.role_provider = role_provider
         self.batches: Dict[str, dict] = {}  # batch_id -> state
         self.conversation_timeout_seconds = int(os.getenv("IRT_CONVERSATION_TIMEOUT_SECONDS", "1800"))
@@ -395,6 +354,7 @@ class IRTBatchRunner:
                         patient_model=state["patient_model"],
                         patient_prompt_version=p_ver,
                         interviewer_prompt_version=i_ver,
+                        end_judge=self.end_judge,
                     )
                     conv_result = await asyncio.wait_for(
                         conv.run(patient_id, session_id),
