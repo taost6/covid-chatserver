@@ -8,4 +8,4 @@ google-auth
 google-api-python-client
 openpyxl
 psycopg2-binary
-SQLAlchemy
+SQLAlchemy>=2.0,<2.1
