@@ -1214,10 +1214,10 @@ const deleteInstance = async () => {
 const batchPatientInput = ref('');
 const batchRunsPerPatient = ref(1);
 const batchConcurrency = ref(2);
-const batchNurseModel = ref('gpt-4.1');
-const batchPatientModel = ref('gpt-4.1');
-const batchEvaluatorModel = ref('gpt-4.1');
-const modelOptions = ['gpt-4.1', 'gpt-5-mini', 'gpt-5.2', 'gpt-5.4', 'gpt-5-nano'];
+const batchNurseModel = ref('gpt-6.1-sol');
+const batchPatientModel = ref('gpt-6.1-sol');
+const batchEvaluatorModel = ref('gpt-6.1-sol');
+const modelOptions = ['gpt-6.1-sol', 'gpt-4.1', 'gpt-5-mini', 'gpt-5.2', 'gpt-5.4', 'gpt-5-nano'];
 const batchPatientPromptVersion = ref<number | null>(null);
 const batchInterviewerPromptVersion = ref<number | null>(null);
 const batchEvaluatorPromptVersion = ref<number | null>(null);

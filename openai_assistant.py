@@ -114,9 +114,10 @@ class ConversationState:
 
 class OpenAIAssistantWrapper():
     # Reasoningモデル判定用パターン
-    # o-series (o1, o3, o4-mini等) および gpt-5.4 が該当
+    # o-series (o1, o3, o4-mini等)、gpt-5.4、gpt-6.1-sol が該当
+    # （gpt-6.1-sol は指定なしでも推論トークンを使い、reasoning と developer ロールを受け付けることを実測済み）
     REASONING_MODEL_PREFIXES = ('o1', 'o3', 'o4')
-    REASONING_MODEL_NAMES = ('gpt-5.4',)
+    REASONING_MODEL_NAMES = ('gpt-5.4', 'gpt-6.1-sol')
 
     def __init__(self, config):
         self.config = config

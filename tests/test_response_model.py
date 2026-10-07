@@ -29,8 +29,11 @@ class ResponseModelTest(unittest.IsolatedAsyncioTestCase):
         result, _ = await self.wrapper.send_message(self.assistant, '質問')
         self.assertEqual(result, '回答')
         request = self.client.responses.create.call_args.kwargs
-        self.assertEqual(request['model'], 'gpt-4.1')
+        self.assertEqual(request['model'], 'gpt-6.1-sol')
         self.assertEqual(request['input'][0]['content'], 'managed patient prompt')
+        # 既定の gpt-6.1-sol は推論モデルとして、管理プロンプトを developer ロールで渡す
+        self.assertEqual(request['input'][0]['role'], 'developer')
+        self.assertEqual(request['reasoning'], {'effort': 'medium'})
         self.assertNotIn('instructions', request)
         self.assertEqual(self.assistant.last_response_model, 'gpt-4.1-2025-04-14')
         self.assertNotIn('last_response_model', self.assistant.model_dump())

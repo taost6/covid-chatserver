@@ -1798,9 +1798,10 @@ def api(config):
         patient_ids: List[str]
         runs_per_patient: int = 1
         concurrency: int = 2
-        nurse_model: str = "gpt-4.1"
-        patient_model: str = "gpt-4.1"
-        evaluator_model: str = "gpt-4.1"
+        # 省略時は通常モードと同じアプリ設定のモデル。明示指定すれば任意のモデルを選べる
+        nurse_model: Optional[str] = None
+        patient_model: Optional[str] = None
+        evaluator_model: Optional[str] = None
         patient_prompt_version: Optional[int] = None
         interviewer_prompt_version: Optional[int] = None
         evaluator_prompt_version: Optional[int] = None
@@ -1815,17 +1816,20 @@ def api(config):
         if req.concurrency < 1:
             raise HTTPException(status_code=400, detail="concurrency must be >= 1")
 
+        nurse_model = oaw.resolve_model("保健師", req.nurse_model)
+        patient_model = oaw.resolve_model("患者", req.patient_model)
+        evaluator_model = req.evaluator_model or IRT_JUDGMENT_MODEL
         batch_id = await batch_runner.start_batch(
             req.patient_ids, req.runs_per_patient, req.concurrency,
-            nurse_model=req.nurse_model,
-            patient_model=req.patient_model,
-            evaluator_model=req.evaluator_model,
+            nurse_model=nurse_model,
+            patient_model=patient_model,
+            evaluator_model=evaluator_model,
             patient_prompt_version=req.patient_prompt_version,
             interviewer_prompt_version=req.interviewer_prompt_version,
             evaluator_prompt_version=req.evaluator_prompt_version,
         )
         total = len(req.patient_ids) * req.runs_per_patient
-        logger.info(f"IRT batch started: batch_id={batch_id} total={total} models=nurse:{req.nurse_model}/patient:{req.patient_model}/eval:{req.evaluator_model} prompt_ver=patient:{req.patient_prompt_version}/interviewer:{req.interviewer_prompt_version}/evaluator:{req.evaluator_prompt_version}")
+        logger.info(f"IRT batch started: batch_id={batch_id} total={total} models=nurse:{nurse_model}/patient:{patient_model}/eval:{evaluator_model} prompt_ver=patient:{req.patient_prompt_version}/interviewer:{req.interviewer_prompt_version}/evaluator:{req.evaluator_prompt_version}")
         return {"batch_id": batch_id, "total_tasks": total}
 
     @app.get("/v1/irt/batch/status/{batch_id}")
