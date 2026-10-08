@@ -41,6 +41,14 @@
                   :rules="[rules.required]" 
                   required
                 ></v-select>
+                <v-select
+                  v-if="selectedRole === '保健師' || selectedRole === '傍聴者'"
+                  v-model="interviewDateMode"
+                  label="調査日（診断日からの日数）"
+                  :items="interviewDateModes"
+                  :rules="[rules.required]"
+                  required
+                ></v-select>
                 <v-select 
                   v-if="selectedRole === '保健師' || selectedRole === '傍聴者'" 
                   v-model="patientUnderstanding" 
@@ -176,6 +184,14 @@ const userName = ref('');
 const selectedRole = ref<UserRole | null>(null);
 const selectedPatientId = ref<string | null>(null);
 const patientUnderstanding = ref<string>('高');
+// 調査日の決め方。既定値は持たず、患者を選ぶロールでは必ず選ばせる
+const interviewDateMode = ref<string | null>(null);
+const interviewDateModes = [
+  { title: 'ランダム（+0〜+2日）', value: 'random' },
+  { title: '固定 +0日（診断当日）', value: 'plus0' },
+  { title: '固定 +1日', value: 'plus1' },
+  { title: '固定 +2日', value: 'plus2' },
+];
 const fontSize = ref(1);
 const submitWithEnter = ref(true);
 const submitThenClear = ref(true);
@@ -207,6 +223,7 @@ const handleRegistration = async () => {
       user_name: userName.value,
       user_role: selectedRole.value,
       target_patient_id: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? String(selectedPatientId.value) : undefined,
+      interview_date_mode: selectedRole.value === '保健師' || selectedRole.value === '傍聴者' ? interviewDateMode.value ?? undefined : undefined,
     };
     
     const result = await api.registerUser(userData);

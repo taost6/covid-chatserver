@@ -2051,7 +2051,7 @@ def api(config):
         users_waiting[user_id] = UserDef(
             user_id=user_id, user_name=req.user_name, role=req.user_role,
             status=Status.Registered.name, target_patient_id=req.target_patient_id,
-            session_id=session_id
+            interview_date_mode=req.interview_date_mode, session_id=session_id
         )
         return RegistrationAccepted(user_id=user_id, session_id=session_id)
 
@@ -2210,7 +2210,8 @@ def api(config):
                         patient_id_for_ai = user.target_patient_id or "1"
                         
                         if prompt_needed:
-                            prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                            prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(
+                                patient_id_for_ai, interview_date_mode=user.interview_date_mode)
                             db_session.interview_date = interview_date_str
                             db.commit()
                             logger.info(f"Saved new interview_date: {interview_date_str}")
@@ -2252,7 +2253,8 @@ def api(config):
                         if prompt_needed:
                             # 患者データから面接日を取得
                             patient_id_for_ai = user.target_patient_id or "1"
-                            _, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                            _, interview_date_str = role_provider.get_patient_prompt_chunks(
+                                patient_id_for_ai, interview_date_mode=user.interview_date_mode)
 
                             db_session.interview_date = interview_date_str
                             db.commit()
@@ -2329,7 +2331,8 @@ def api(config):
                     
                     # 面接日を計算してデータベースに保存（保健師ロールと同じロジック）
                     patient_id_for_ai = user.target_patient_id or "1"
-                    prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(patient_id_for_ai)
+                    prompt_chunks, interview_date_str = role_provider.get_patient_prompt_chunks(
+                        patient_id_for_ai, interview_date_mode=user.interview_date_mode)
                     db_session.interview_date = interview_date_str
                     db.commit()
                     

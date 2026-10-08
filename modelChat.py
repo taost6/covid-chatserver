@@ -100,6 +100,8 @@ class RegistrationRequest(BaseModel):
     user_role: Literal["保健師", "患者", "傍聴者"]
     target_patient_id: Optional[str] = Field(None,
             description="保健師が対話したい患者のID")
+    interview_date_mode: Optional[Literal["random", "plus0", "plus1", "plus2"]] = Field(None,
+            description="調査日の決め方（診断日からの日数）。省略時は固定+2日")
 
 # S > U
 class RegistrationAccepted(BaseModel):

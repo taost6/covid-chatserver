@@ -47,7 +47,7 @@ class InterviewDateTest(unittest.TestCase):
                 )
 
     def make_prompt(self, disclosed="診断日：2022-04-20", onset="2022-04-18",
-                    infection="2022-04-16", saved_date=None):
+                    infection="2022-04-16", saved_date=None, mode=None):
         row = {
             "ID": 1, "氏名": "テスト患者",
             "調査開始時点で開示されている情報": disclosed,
@@ -62,7 +62,7 @@ class InterviewDateTest(unittest.TestCase):
         with patch("modelDatabase.PromptSessionLocal"), \
                 patch("modelPrompt.PromptTemplateService") as service:
             service.return_value.get_active_template.return_value = template
-            return self.provider.get_patient_prompt_chunks("1", saved_date)
+            return self.provider.get_patient_prompt_chunks("1", saved_date, interview_date_mode=mode)
 
     def test_diagnosis_takes_priority_and_limits_disclosed_actions(self):
         chunks, date = self.make_prompt()
@@ -92,6 +92,43 @@ class InterviewDateTest(unittest.TestCase):
         self.assertEqual(date, saved)
         self.assertIn("当日の行動", "\n".join(chunks))
         self.assertNotIn("二日後の行動", "\n".join(chunks))
+
+    def test_fixed_modes_from_role_selection(self):
+        for mode, expected in [("plus0", (datetime(2022, 4, 20), "（午後・夜間）")),
+                               ("plus1", (datetime(2022, 4, 21), "")),
+                               ("plus2", (datetime(2022, 4, 22), ""))]:
+            with self.subTest(mode=mode):
+                for _ in range(10):
+                    self.assertEqual(self.provider._determine_interview_date("2022-04-20", mode), expected)
+
+    def test_random_mode_uses_previous_distribution(self):
+        for value, expected in [(0.0, (datetime(2022, 4, 20), "（午後・夜間）")),
+                                (0.49, (datetime(2022, 4, 20), "（午後・夜間）")),
+                                (0.5, (datetime(2022, 4, 21), "")),
+                                (0.89, (datetime(2022, 4, 21), "")),
+                                (0.9, (datetime(2022, 4, 22), ""))]:
+            with self.subTest(value=value), patch("modelRole.random.random", return_value=value):
+                self.assertEqual(self.provider._determine_interview_date("2022-04-20", "random"), expected)
+
+    def test_mode_is_applied_to_new_session_but_saved_date_wins(self):
+        _, date = self.make_prompt(mode="plus0")
+        self.assertEqual(date, "2022年04月20日（水曜日）（午後・夜間）")
+        _, date = self.make_prompt(mode="plus1")
+        self.assertEqual(date, "2022年04月21日（木曜日）")
+        _, date = self.make_prompt(mode=None)
+        self.assertEqual(date, "2022年04月22日（金曜日）")
+        saved = "2022年04月22日（金曜日）"
+        _, date = self.make_prompt(saved_date=saved, mode="plus0")
+        self.assertEqual(date, saved)
+
+    def test_registration_accepts_only_known_modes(self):
+        from pydantic import ValidationError
+        from modelChat import RegistrationRequest
+        self.assertEqual(RegistrationRequest(user_name="a", user_role="保健師", target_patient_id="60",
+                                             interview_date_mode="plus1").interview_date_mode, "plus1")
+        self.assertIsNone(RegistrationRequest(user_name="a", user_role="患者").interview_date_mode)
+        with self.assertRaises(ValidationError):
+            RegistrationRequest(user_name="a", user_role="保健師", interview_date_mode="plus3")
 
 
 if __name__ == "__main__":

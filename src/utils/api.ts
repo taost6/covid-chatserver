@@ -85,6 +85,7 @@ export const api = {
     user_name: string;
     user_role: UserRole;
     target_patient_id?: string;
+    interview_date_mode?: string;
   }): Promise<{ user_id: string; session_id: string; msg_type: string }> {
     const protocol = window.location.protocol.replace(':', '');
     const host = window.location.host;

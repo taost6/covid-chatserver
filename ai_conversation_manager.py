@@ -112,7 +112,8 @@ class AIConversationManager:
             
             # 面接日が渡されていない場合は患者プロンプトから取得
             if not interview_date_str:
-                _, interview_date_str = self.role_provider.get_patient_prompt_chunks(patient_id)
+                _, interview_date_str = self.role_provider.get_patient_prompt_chunks(
+                    patient_id, interview_date_mode=self.observer_user.interview_date_mode)
             
             # 患者AIのプロンプト設定（計算した面接日を使用）
             prompt_chunks, _ = self.role_provider.get_patient_prompt_chunks(patient_id, interview_date_str)

@@ -9,6 +9,7 @@ import os
 import json
 import re
 from datetime import datetime, timedelta
+import random
 import argparse
 import asyncio
 from chatconf import ChatConfigModel, set_config
@@ -102,8 +103,14 @@ class PatientRoleProvider:
     def _get_column_indices(self):
         return {col: self.df.columns.tolist().index(col) if col in self.df.columns else -1 for col in self.target_columns}
 
-    def _determine_interview_date(self, base_date_str: str) -> (datetime, str):
-        """調査日を基準日（原則として診断日）の2日後に固定する。"""
+    # 調査日の決め方（ロール選択画面で選ぶ）。random は旧仕様の確率（+0日 50%／+1日 40%／+2日 10%）
+    INTERVIEW_DATE_MODES = ("random", "plus0", "plus1", "plus2")
+    DEFAULT_INTERVIEW_DATE_MODE = "plus2"
+
+    def _determine_interview_date(self, base_date_str: str, mode: str = DEFAULT_INTERVIEW_DATE_MODE) -> (datetime, str):
+        """調査日を基準日（原則として診断日）からの日数で決める。
+        mode: plus0 / plus1 / plus2 は固定、random は旧仕様の確率で決める。未知の値は plus2 とする。
+        診断当日（+0日）の調査は、陽性判明後の時間帯として「（午後・夜間）」を付ける。"""
         base_date = None
         # base_date_strが文字列でない場合やNone、空文字列の場合のチェック
         if not base_date_str or base_date_str == "不明" or pd.isna(base_date_str):
@@ -119,7 +126,12 @@ class PatientRoleProvider:
                 # 変換に失敗した場合はデフォルト日付を使用
                 base_date = datetime(2022, 4, 30)
 
-        return base_date + timedelta(days=2), ""
+        if mode == "random":
+            rand_val = random.random()
+            days = 0 if rand_val < 0.5 else 1 if rand_val < 0.9 else 2
+        else:
+            days = {"plus0": 0, "plus1": 1}.get(mode, 2)
+        return base_date + timedelta(days=days), ("（午後・夜間）" if days == 0 else "")
 
     def _split_text_for_prompt(self, text: str, max_length: int) -> List[str]:
         """指定された最大長に基づいて、キリの良い場所でテキストを分割する。"""
@@ -155,10 +167,11 @@ class PatientRoleProvider:
 
         return [chunk for chunk in chunks if chunk] # 空のチャンクを除外
 
-    def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None, prompt_version: int = None) -> (List[str], str):
+    def get_patient_prompt_chunks(self, patient_id: str, interview_date_str: str = None, prompt_version: int = None,
+                                  interview_date_mode: str = None) -> (List[str], str):
         """
         指定された患者IDのプロンプトを、API制限を考慮して分割されたチャンクのリストとして返す。
-        interview_date_strが指定された場合はその日付を、されなければ基準日の2日後に固定する。
+        interview_date_strが指定された場合はその日付を、されなければ interview_date_mode（既定は基準日の2日後）で決める。
         """
         if self.df is None:
             raise RuntimeError("Provider is not initialized. Call `await provider.initialize()` first.")
@@ -198,7 +211,8 @@ class PatientRoleProvider:
             if base_date_str is None:
                 base_date_str = "2022-04-30"
 
-            interview_date, time_of_day = self._determine_interview_date(base_date_str)
+            interview_date, time_of_day = self._determine_interview_date(
+                base_date_str, interview_date_mode or self.DEFAULT_INTERVIEW_DATE_MODE)
             
             weekdays = ["月", "火", "水", "木", "金", "土", "日"]
             weekday_str = weekdays[interview_date.weekday()]
