@@ -187,10 +187,10 @@ const patientUnderstanding = ref<string>('高');
 // 調査日の決め方。既定値は持たず、患者を選ぶロールでは必ず選ばせる
 const interviewDateMode = ref<string | null>(null);
 const interviewDateModes = [
-  { title: 'ランダム（+0〜+2日）', value: 'random' },
-  { title: '固定 +0日（診断当日）', value: 'plus0' },
-  { title: '固定 +1日', value: 'plus1' },
-  { title: '固定 +2日', value: 'plus2' },
+  { title: '診断当日', value: 'plus0' },
+  { title: '診断翌日', value: 'plus1' },
+  { title: '診断翌々日', value: 'plus2' },
+  { title: 'ランダム', value: 'random' },
 ];
 const fontSize = ref(1);
 const submitWithEnter = ref(true);
