@@ -8,7 +8,9 @@ from intent_assessment import (ASSESSMENT_SCHEMA_VERSION, TOOL, disclosed_contex
                                summarize, validate_assessment)
 from modelUserDef import AssistantDef
 
-MAX_OUTPUT_TOKENS = 10000
+# 発言を意味単位ごとに原文で引用するため、保健師の発言が多いと出力が長くなる。
+# 推論トークンもこの上限に含まれ、10000 では長い会話の採点が途中で切れて JSON が壊れた（2026-10-01）。
+MAX_OUTPUT_TOKENS = 32000
 
 
 class AssessmentConfigurationError(ValueError):
