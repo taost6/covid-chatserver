@@ -27,8 +27,10 @@ async def assess(oaw, payload):
     try:
         assistant = AssistantDef(user_id=str(uuid.uuid4()), role='評価者',
                                  assistant_id='intent-rubric', thread_id=thread)
+        # 調査方向は集計専用。採点AIには渡さず、方向の導入前と同じ入力で採点させる。
+        message = dict(payload, items=[{k: v for k, v in i.items() if k != 'direction'} for i in payload['items']])
         # Explicit instructions/model avoid inheriting a legacy assistant's rubric.
-        _, call = await oaw.send_message(assistant, json.dumps(payload, ensure_ascii=False),
+        _, call = await oaw.send_message(assistant, json.dumps(message, ensure_ascii=False),
                                          instructions=payload['assessment']['instructions'],
                                          model=payload['assessment']['model'], tools=[TOOL],
                                          tool_choice='required', max_retries=0,
@@ -64,16 +66,25 @@ def assessment_settings(db, model, prompt_version=None):
                 prompt_version=template.version, instructions=template.prompt_text, model=model)
 
 
+def item_directions(db, items):
+    """項目ごとの調査方向（患者別の上書き > 項目型の既定）。"""
+    from modelIRT import IRTItemType
+    defaults = {t.code: t.investigation_direction for t in db.query(IRTItemType).all()}
+    return {i.id: i.investigation_direction_override or defaults.get(i.item_type_code) for i in items}
+
+
 def load_input(db, session_id):
     from modelDatabase import ChatLog
     from modelSession import Session
     from modelIRT import IRTPatientInstance
     session = db.query(Session).filter_by(session_id=session_id).one()
     items = db.query(IRTPatientInstance).filter_by(patient_id=session.patient_id).all()
+    directions = item_directions(db, items)
     logs = [row_dict(l) for l in db.query(ChatLog).filter_by(session_id=session_id).order_by(
         ChatLog.created_at, ChatLog.id).all()]
     # Original injected scenario, not today's mutable Drive data. Never use evaluation reports as context.
-    return make_input(row_dict(session), [row_dict(i) for i in items], logs, disclosed_context(logs))
+    return make_input(row_dict(session), [dict(row_dict(i), direction=directions[i.id]) for i in items],
+                      logs, disclosed_context(logs))
 
 
 ACT_COUNT_KEYS = ('question_count', 'confirmation_count', 'explanation_count', 'other_act_count')
@@ -103,11 +114,18 @@ def saved_act_counts(db, session_ids):
     return counts
 
 
-def saved_result(run):
+def saved_result(run, db=None):
     document = json.loads(run.result_json)
     # Restore the model's original grade, not a previous validator's automatic pending fallback.
     raw = document.get('model_output', document.get('assessment', document))
     payload = json.loads(run.input_json)
+    if db is not None and not any(i.get('direction') for i in payload['items']):
+        # 方向の導入前に保存した採点は、現在の項目定義の方向で後ろ向き聴取率を出す（採点結果は変えない）
+        from modelIRT import IRTPatientInstance
+        rows = db.query(IRTPatientInstance).filter(
+            IRTPatientInstance.id.in_([i['id'] for i in payload['items']])).all()
+        directions = item_directions(db, rows)
+        payload['items'] = [dict(i, direction=directions.get(i['id'])) for i in payload['items']]
     if payload.get('schema_version') == 'intent-1':
         for judgment in raw['judgments']:
             if judgment['grade'] == 'pending':
@@ -138,8 +156,9 @@ async def ensure_assessment(db, session_id, oaw, evaluator_model=None, prompt_ve
         if prompt_version is not None and (settings.get('prompt_version') != prompt_version
                                            or settings.get('model') != evaluator_model):
             raise ValueError('Saved assessment uses different settings; it will not be overwritten')
+        result = saved_result(existing, db)
         db.rollback()
-        return saved_result(existing)
+        return result
     payload = load_input(db, session_id)
     payload['assessment'] = assessment_settings(db, evaluator_model, prompt_version)
     raw = await assess(oaw, payload)
