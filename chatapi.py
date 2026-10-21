@@ -46,6 +46,10 @@ class AssessmentMetrics(BaseModel):
     assessed_item_count: Optional[int] = None
     incidental_item_count: Optional[int] = None
     missing_item_count: Optional[int] = None
+    # 前向き調査の項目を除いた聴取率（全項目の score とは別に出す）
+    backward_score: Optional[float] = None
+    backward_item_count: Optional[int] = None
+    backward_collected_item_count: Optional[int] = None
     # 保健師発話の意味単位をLLMが分類した件数。新採点が未保存のセッションは None（未判定）
     question_count: Optional[int] = None
     confirmation_count: Optional[int] = None
@@ -170,7 +174,7 @@ class PatientSessionStat(BaseModel):
     total_count: int
     accuracy: float
     # 対話量と、保健師発話の内訳（LLM分類。新採点が未保存なら None＝未判定）
-    message_count: int = 0            # 対話メッセージ総数（保健師+患者、初期メッセージ除く）
+    message_count: int = 0            # 会話数（保健師+患者、初期挨拶を含む）
     nurse_turn_count: int = 0         # 保健師の発話数
     question_count: Optional[int] = None
     confirmation_count: Optional[int] = None
@@ -1352,7 +1356,7 @@ def api(config):
         質問・確認・説明の内訳は文字列から数えず、保存済みのLLM分類（saved_act_counts）を使う。
 
         保健師発話の判定: AI保健師は ai_role='保健師'、人間保健師は sender='User' かつ
-        user_role='保健師'。初期メッセージ・システムメッセージは除外。
+        user_role='保健師'。初期挨拶は画面に見える発話なので含め、システムメッセージは除外。
         """
         if not session_ids:
             return {}
@@ -1365,7 +1369,6 @@ def api(config):
             FROM {chat_table}
             WHERE session_id = ANY(:ids)
               AND sender IN ('User', 'Assistant')
-              AND is_initial_message = FALSE
             GROUP BY session_id
         """), {"ids": list(session_ids)})
         return {r.session_id: r for r in rows}
@@ -1380,7 +1383,7 @@ def api(config):
             raise HTTPException(status_code=404, detail='Session not found')
         saved = get_saved(db, session_id)
         if saved:
-            return saved_result(saved)
+            return saved_result(saved, db)
         if IRTResponseJudgmentService(db).get_judgments_for_session(session_id):
             return None
         assessment_db = modelDatabase.SessionLocal()
@@ -1785,6 +1788,7 @@ def api(config):
         description: Optional[str]
         risk_score: Optional[float]
         collected: bool
+        direction: Optional[str] = None
         grade: Optional[str] = None
         reason: Optional[str] = None
         confidence: Optional[float] = None

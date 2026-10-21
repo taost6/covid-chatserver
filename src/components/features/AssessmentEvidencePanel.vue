@@ -22,17 +22,18 @@ import { CSVExporter } from '@/utils/csvExport';
 import { gradeLabel, type AssessmentMetrics, type AssessmentEvidence } from '@/types/assessment';
 const props = defineProps<{ result: AssessmentMetrics & {
   patient_id: string; score: number | null; message_count: number;
-  items: (AssessmentEvidence & { instance_id: number; item_type_code: string; description: string | null; collected: boolean })[];
+  items: (AssessmentEvidence & { instance_id: number; item_type_code: string; description: string | null; collected: boolean; direction?: string | null })[];
 } }>();
 const download = () => {
   const r = props.result;
   const rows = [
     ['患者ID', '評価版', '調査日', '項目ID', '項目', '判定', '理由', '質問・確認ID', '回答ID',
-      '表示発話数', '実質対話数', '質問行為数', '確認行為数', '説明行為数', '聴取率'],
+      '調査方向', '会話数', '初期挨拶数', '質問行為数', '確認行為数', '説明行為数', '聴取率', '後ろ向き聴取率'],
     ...r.items.map(i => [r.patient_id, r.assessment_version, r.interview_date, i.instance_id,
       i.item_type_code, gradeLabel(i.grade, i.collected), i.reason,
-      i.question_message_ids?.join(' '), i.answer_message_ids?.join(' '), r.display_message_count,
-      r.message_count, r.question_count, r.confirmation_count, r.explanation_count, r.score]),
+      i.question_message_ids?.join(' '), i.answer_message_ids?.join(' '), i.direction, r.message_count,
+      r.initial_message_count, r.question_count, r.confirmation_count, r.explanation_count, r.score,
+      r.backward_score]),
   ];
   const headers = rows[0].map(String);
   const data = rows.slice(1).map(row => Object.fromEntries(row.map((value, index) => {

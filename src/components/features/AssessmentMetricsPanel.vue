@@ -5,9 +5,10 @@
         採点プロンプト v{{ result.evaluator_prompt_version ?? '不明' }} ／ {{ result.evaluator_model ?? '不明' }}</div>
       <div>○ {{ result.collected_item_count }} ／ △ {{ result.incidental_item_count }} ／
         × {{ result.missing_item_count }}</div>
-      <div class="mt-1">表示発話数 {{ result.display_message_count }}
-        （初期挨拶 {{ result.initial_message_count }} を含む）</div>
-      <div>実質対話数 {{ result.message_count }} ／ 保健師発話 {{ result.nurse_turn_count }}</div>
+      <div v-if="result.backward_score != null">後ろ向き聴取率 {{ (result.backward_score * 100).toFixed(1) }}%
+        （○ {{ result.backward_collected_item_count }} ／ {{ result.backward_item_count }} 項目。発症後の接触者・家庭内分離など前向き調査の項目を除く）</div>
+      <div class="mt-1">会話数 {{ result.message_count }}
+        （初期挨拶 {{ result.initial_message_count }} を含む）／ 保健師発話 {{ result.nurse_turn_count }}</div>
       <div class="mt-1">質問 {{ result.question_count }} ／ 確認 {{ result.confirmation_count }} ／
         説明 {{ result.explanation_count }} ／ その他 {{ result.other_act_count }}</div>
       <div class="text-caption text-grey">質問・確認・説明は発話内の意味単位で数えています。発話数とは異なります。</div>
@@ -15,7 +16,7 @@
     </template>
     <template v-else>
       <div>旧判定の聴取項目数：{{ result.collected_item_count }} / {{ result.total_item_count }}</div>
-      <div>対話量（初期挨拶を除く）：{{ result.message_count }}</div>
+      <div>会話数（初期挨拶を含む）：{{ result.message_count }}</div>
       <div>質問・確認・説明：未判定</div>
       <div class="text-caption text-grey">旧判定から、意図を持って聴取したかや発話の内訳は判断できません。</div>
     </template>

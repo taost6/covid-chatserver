@@ -32,9 +32,26 @@ class IntentValidationTest(unittest.TestCase):
         payload, raw = fixture()
         out = summarize(raw, payload)
         self.assertEqual(out['score'], 1)
-        self.assertEqual((out['display_message_count'], out['message_count']), (3, 2))
+        # 会話数は初期挨拶を含めて数える
+        self.assertEqual((out['display_message_count'], out['message_count'], out['initial_message_count']), (3, 3, 1))
+        self.assertIsNone(out['backward_score'])
         self.assertEqual(out['question_count'], 1)
         self.assertNotIn('legacy_question_mark_count', out)
+
+    def test_backward_score_excludes_forward_items(self):
+        payload = make_input(dict(session_id='s', patient_id='60', interview_date=None),
+                             [dict(id=1, item_type_code='T-3', instance_number=1, description='同僚との接触', direction='both'),
+                              dict(id=2, item_type_code='U-4', instance_number=1, description='発症後の接触者', direction='forward')],
+                             [dict(id=11, sender='User', user_role='保健師', message='同僚と近くで話しましたか。'),
+                              dict(id=12, sender='Assistant', ai_role='患者', message='はい、毎日話しました。')])
+        raw = dict(judgments=[dict(instance_id=1, grade='full', question_message_ids=[11], answer_message_ids=[12],
+                                   confidence=0.9, reason='同僚との接触を聞いた。'),
+                              dict(instance_id=2, grade='missing', question_message_ids=[], answer_message_ids=[],
+                                   confidence=0.9, reason='聞いていない。')],
+                   acts=[dict(message_id=11, kind='question', quote='同僚と近くで話しましたか。')])
+        out = summarize(raw, payload)
+        self.assertEqual(out['score'], 0.5)
+        self.assertEqual((out['backward_score'], out['backward_item_count']), (1, 1))
 
     def test_incidental_is_distinct_from_missing_and_not_correct(self):
         payload, raw = fixture()
@@ -308,6 +325,18 @@ class PersistenceTest(unittest.IsolatedAsyncioTestCase):
         await assess(wrapper, payload)
         self.assertEqual(wrapper.send_message.call_args.kwargs['instructions'], 'managed test rubric')
         self.assertEqual(wrapper.send_message.call_args.kwargs['model'], 'selected-model')
+
+    async def test_direction_is_for_aggregation_only_and_not_sent_to_the_evaluator(self):
+        payload, raw = fixture()
+        payload['items'][0]['direction'] = 'forward'
+        payload['assessment'] = assessment_settings(self.db, 'selected-model', 1)
+        wrapper = SimpleNamespace(create_thread=AsyncMock(return_value='thread'),
+            delete_thread_by_id=AsyncMock(), send_message=AsyncMock(return_value=(None,
+                SimpleNamespace(name='submit_intent_assessment', arguments=json.dumps(raw)))))
+        await assess(wrapper, payload)
+        sent = json.loads(wrapper.send_message.call_args.args[1])
+        self.assertNotIn('direction', sent['items'][0])
+        self.assertEqual(payload['items'][0]['direction'], 'forward')
 
     async def test_missing_managed_version_has_no_fallback(self):
         with self.assertRaises(ValueError):

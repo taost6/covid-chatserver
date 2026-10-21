@@ -1498,7 +1498,7 @@ const sessionCompareHeaders = [
   { title: '日時', key: 'created_at', width: '180px' },
   { title: '保健師', key: 'nurse_model', width: '130px' },
   { title: '患者モデル', key: 'patient_model', width: '130px' },
-  { title: '対話量', key: 'message_count', width: '80px' },
+  { title: '会話数', key: 'message_count', width: '80px' },
   // 保健師発話の意味単位をLLMが分類した件数（新採点が未保存のセッションは「未判定」）
   { title: '質問', key: 'question_count', width: '70px' },
   { title: '確認', key: 'confirmation_count', width: '70px' },

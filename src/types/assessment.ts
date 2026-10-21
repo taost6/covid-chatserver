@@ -7,6 +7,10 @@ export interface AssessmentMetrics {
   initial_message_count?: number | null;
   incidental_item_count?: number | null;
   missing_item_count?: number | null;
+  // 前向き調査の項目を除いた聴取率（旧判定では null）
+  backward_score?: number | null;
+  backward_item_count?: number | null;
+  backward_collected_item_count?: number | null;
   // LLMによる保健師発話の分類件数。新採点が未保存のセッションは null（未判定）
   question_count?: number | null;
   confirmation_count?: number | null;

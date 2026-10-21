@@ -81,7 +81,7 @@ def make_input(session, items, logs, knowledge_context=''):
     selected = [dict(id=i['id'], item_type_code=i['item_type_code'],
                      instance_number=i['instance_number'], description=i.get('description') or '',
                      catalog_version=i.get('catalog_version'),
-                     risk_score=i.get('pairwise_risk_score'))
+                     risk_score=i.get('pairwise_risk_score'), direction=i.get('direction'))
                 for i in items if i.get('is_detectable', True) and not i.get('is_excluded_from_analysis', False)]
     if not selected or not dialogue or len({x['id'] for x in selected}) != len(selected):
         raise ValueError('Items/dialogue empty or item IDs duplicated')
@@ -150,21 +150,29 @@ def summarize(raw, payload):
     counts = Counter(j['grade'] for j in raw['judgments'])
     acts = Counter(a['kind'] for a in raw['acts'])
     items = [dict(instance_id=i['id'], item_type_code=i['item_type_code'], description=i['description'],
-                  risk_score=i['risk_score'], collected=by_id[i['id']]['grade'] == 'full', **{
+                  risk_score=i['risk_score'], direction=i.get('direction'), collected=by_id[i['id']]['grade'] == 'full', **{
                       k: v for k, v in by_id[i['id']].items() if k != 'instance_id'}) for i in payload['items']]
+    # 会話数は初期挨拶を含めて数える（画面に見える発話数と一致させる。2026-10-21）
     display = len(payload['dialogue'])
-    substantive = [m for m in payload['dialogue'] if not m['initial']]
-    nurses = [m for m in substantive if m['role'] == '保健師']
+    initial = sum(1 for m in payload['dialogue'] if m['initial'])
+    nurses = [m for m in payload['dialogue'] if m['role'] == '保健師']
     denominator = len(items)
     score = counts['full'] / denominator if denominator else None
+    # 後ろ向き聴取率：前向き調査（発症後の接触者・家庭内分離など）の項目を除いた○の割合。
+    # 方向を持たない旧入力では算出しない。
+    backward = ([i for i in payload['items'] if i.get('direction') != 'forward']
+                if any(i.get('direction') for i in payload['items']) else [])
+    backward_full = sum(1 for i in backward if by_id[i['id']]['grade'] == 'full')
     return dict(patient_id=payload['patient_id'], assessment_version=ASSESSMENT_SCHEMA_VERSION,
                 evaluator_prompt_version=payload.get('assessment', {}).get('prompt_version'),
                 evaluator_model=payload.get('assessment', {}).get('model'),
                 score=score, total_item_count=len(items), assessed_item_count=denominator,
                 collected_item_count=counts['full'], incidental_item_count=counts['incidental'],
                 missing_item_count=counts['missing'],
-                items=items, message_count=len(substantive), display_message_count=display,
-                initial_message_count=display-len(substantive), nurse_turn_count=len(nurses),
+                backward_score=backward_full / len(backward) if backward else None,
+                backward_item_count=len(backward), backward_collected_item_count=backward_full,
+                items=items, message_count=display, display_message_count=display,
+                initial_message_count=initial, nurse_turn_count=len(nurses),
                 question_count=acts['question'], confirmation_count=acts['confirmation'],
                 explanation_count=acts['explanation'], other_act_count=acts['other'],
                 acts=raw['acts'], interview_date=payload['interview_date'])
