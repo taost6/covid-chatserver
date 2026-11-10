@@ -430,9 +430,11 @@ async def _execute_debriefing_with_specialist(session: APISession, user: UserDef
             if patient_details:
                 # logger.info(f"[DEBRIEFING DEBUG] Patient details keys: {list(patient_details.keys()) if patient_details else 'None'}")
                 
-                # 面接日を特定（セッション履歴から取得）
-                interview_date_str = None
-                system_messages = [msg for msg in session.history.history if msg.role == "system"]
+                # 面接日を特定する。DBに保存した調査日を優先する（患者AIに渡した日付と同じもの）。
+                # 見つからないと既定の「診断日＋2日」で設定が作り直され、会話の「今日」とずれる（2026-11 奥村先生指摘）。
+                db_session = db.query(SessionModel).filter(SessionModel.session_id == session.session_id).first()
+                interview_date_str = db_session.interview_date if db_session else None
+                system_messages = [] if interview_date_str else [msg for msg in session.history.history if msg.role == "system"]
                 # logger.info(f"[DEBRIEFING DEBUG] Found {len(system_messages)} system messages")
                 
                 for i, msg in enumerate(system_messages):
